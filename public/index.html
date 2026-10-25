@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#e8e5de">
+  <title>Chess</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <main class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="Chess home">
+        <span class="brand-mark">♜</span>
+        <span class="brand-copy"><b>CHESS</b><small><a href="/">FRIENDS & ROOMS</a></small></span>
+      </a>
+      <div class="top-center"><span id="room-label">ONLINE MATCH</span><i></i><span id="game-clock">00:00</span></div>
+    </header>
+
+    <section class="arena">
+      <section class="board-column">
+        <div class="player-strip opponent-strip">
+          <div class="player-avatar avatar-dark">♚</div>
+          <div class="player-meta"><strong id="black-name">BLACK</strong><small>PLAYER 2</small></div>
+          <span class="rating-pill" id="black-rating">800 ELO</span>
+          <div class="captured-list" id="captured-black" aria-label="Black captured pieces"></div>
+          <span class="material" id="black-material"></span>
+        </div>
+        <div class="board-frame">
+          <div id="board" class="board" role="grid" aria-label="Chess board"></div>
+          <div id="capture-effects" class="capture-effects" aria-hidden="true"></div>
+        </div>
+        <div class="player-strip current-strip">
+          <div class="player-avatar avatar-light">♔</div>
+          <div class="player-meta"><strong id="white-name">WHITE</strong><small>PLAYER 1</small></div>
+          <span class="rating-pill" id="white-rating">800 ELO</span>
+          <div class="captured-list" id="captured-white" aria-label="White captured pieces"></div>
+          <span class="material" id="white-material"></span>
+        </div>
+        <div class="board-caption"><span>STANDARD CHESS</span><span>ROTATES EACH TURN</span></div>
+      </section>
+
+      <aside class="control-deck">
+        <section class="turn-card panel">
+          <div class="card-topline"><span class="eyebrow">TURN</span></div>
+          <div class="turn-title"><span id="turn-piece">♙</span><div><h1 id="turn-name">WHITE TO MOVE</h1><p id="turn-subtitle">Make it count.</p></div></div>
+          <div id="check-banner" class="check-banner hidden">CHECK</div>
+        </section>
+
+        <section class="evaluation panel">
+          <div class="section-heading"><div><span class="eyebrow">POSITION</span><h2>Evaluation</h2></div><strong id="eval-score">+0.0</strong></div>
+          <div class="eval-track"><div id="eval-white" class="eval-white"></div><div id="eval-marker" class="eval-marker"></div></div>
+          <div class="eval-legend" title="Estimated from a lightweight material evaluation; not engine analysis."><span>WHITE WIN <b id="white-win-chance">50%</b></span><span>BLACK WIN <b id="black-win-chance">50%</b></span></div>
+          <div class="accuracy-row"><span>WHITE ACCURACY</span><strong id="white-accuracy">100%</strong><span>BLACK ACCURACY</span><strong id="black-accuracy">100%</strong></div>
+        </section>
+
+        <section class="latest-move panel">
+          <div class="section-heading"><div><span class="eyebrow">LAST MOVE</span><h2 id="last-move">—</h2></div><span id="last-grade" class="grade-chip idle">—</span></div>
+          <p id="last-explanation">Move details appear here.</p>
+          <div class="grade-key"><span>BRILLIANT</span><span>BEST</span><span>GOOD</span><span>INACCURACY</span><span>MISTAKE</span><span>BLUNDER</span><span>GRAVE ERROR</span></div>
+        </section>
+
+        <section class="history panel">
+          <div class="section-heading"><div><span class="eyebrow">MOVES</span><h2>Move history</h2></div><span id="move-total" class="move-total">0 PLIES</span></div>
+          <div id="move-list" class="move-list"><div class="empty-history"><p>No moves yet.</p></div></div>
+        </section>
+
+        <div class="action-row">
+          <button class="action-button primary" id="new-game"><span>↻</span> NEW GAME</button>
+          <button class="action-button forfeit-button" id="forfeit-game">FORFEIT</button>
+          <button class="action-button secondary" id="share-room" title="Copy invite link">INVITE</button>
+          <button class="action-button secondary" id="flip-board" title="Flip board">⇅</button>
+        </div>
+        <footer>Move grades are estimates, not engine analysis.</footer>
+      </aside>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" role="status"></div>
+  <div id="elo-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="result-title">
+    <div class="modal-card">
+      <button class="modal-close" id="close-modal" aria-label="Close">×</button>
+      <div class="result-emblem">♛</div>
+      <span class="eyebrow">MATCH COMPLETE</span>
+      <h2 id="result-title">Game over</h2>
+      <p class="modal-subtitle">Account ratings update automatically based on both players’ ratings and the match result.</p>
+      <div id="elo-result" class="elo-result"></div>
+    </div>
+  </div>
+  <div id="promotion-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="promotion-title">
+    <div class="modal-card promotion-card">
+      <span class="eyebrow">PROMOTION</span>
+      <h2 id="promotion-title">Choose a piece</h2>
+      <div class="promotion-options">
+        <button data-promotion="q" aria-label="Promote to queen"></button>
+        <button data-promotion="r" aria-label="Promote to rook"></button>
+        <button data-promotion="b" aria-label="Promote to bishop"></button>
+        <button data-promotion="n" aria-label="Promote to knight"></button>
+      </div>
+    </div>
+  </div>
+  <script src="/app.js" defer></script>
+</body>
+</html>

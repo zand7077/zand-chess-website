@@ -1,0 +1,26 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Run Chess website (Python)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}\\app.py",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "env": {
+                "PORT": "20202"
+            }
+        },
+        {
+            "type": "chrome",
+            "request": "launch",
+            "name": "Open Chess website in Chrome",
+            "url": "http://127.0.0.1:20202",
+            "webRoot": "${workspaceFolder}"
+        }
+    ]
+}

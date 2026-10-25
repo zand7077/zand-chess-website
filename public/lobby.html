@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#e8e5de">
+  <title>Chess | Play with friends</title>
+  <link rel="stylesheet" href="/lobby.css">
+  <script src="/lobby.js" defer></script>
+</head>
+<body>
+  <main class="lobby-shell">
+    <header class="lobby-header">
+      <a class="brand" href="/" aria-label="Chess home"><span class="brand-mark">♜</span>
+        <span class="brand-copy"><b>CHESS</b><small>PLAY TOGETHER</small></span>
+      </a>
+      <button id="logout-button" class="button quiet hidden" type="button">Sign out</button>
+    </header>
+    <section id="account-panel" class="account-panel">
+      <div class="intro">
+        <span class="eyebrow">YOUR NEXT MATCH</span>
+        <h1>Chess is better together.</h1>
+        <p>Play a friend, or create a room and share its link with anyone.</p>
+      </div>
+      <div class="account-card">
+        <h2 id="account-heading">Welcome back</h2>
+        <form id="account-form">
+          <label>Username<input id="username-input" name="username" autocomplete="username" minlength="3" maxlength="20" required></label>
+          <label>Password<input id="password-input" name="password" type="password" autocomplete="current-password" minlength="10" maxlength="128" required></label>
+          <button id="account-submit" class="button primary" type="submit">Sign in</button>
+        </form>
+        <button id="account-switch" class="text-button" type="button">Create an account</button>
+      </div>
+    </section>
+
+    <section class="play-panel">
+      <div class="section-title"><div><span class="eyebrow">QUICK PLAY</span><h2>Start a game</h2></div></div>
+      <div class="quick-play">
+        <button id="create-room" class="button primary" type="button">Create a room</button>
+        <form id="join-form" class="join-form">
+          <label for="room-code">Have a room code?</label>
+          <div class="join-row"><input id="room-code" maxlength="8" autocomplete="off" placeholder="ABCD1234" required><button class="button" type="submit">Join</button></div>
+        </form>
+      </div>
+      <p class="hint">No account is needed to play in a room. Share the room link with your opponent.</p>
+    </section>
+
+    <section id="friends-panel" class="friends-panel hidden">
+      <div class="welcome-row"><div><span class="eyebrow">FRIENDS</span><h2 id="welcome-name">Your chess circle</h2></div></div>
+      <form id="friend-form" class="friend-form">
+        <label for="friend-username">Add a friend by username</label>
+        <div class="join-row"><input id="friend-username" maxlength="20" placeholder="Username" required><button class="button" type="submit">Send request</button></div>
+      </form>
+      <div class="dashboard-grid">
+        <section class="list-card"><h3>Friends</h3><div id="friend-list" class="item-list"><p class="muted">No friends yet.</p></div></section>
+        <section class="list-card"><h3>Friend requests</h3><div id="request-list" class="item-list"><p class="muted">No new requests.</p></div></section>
+        <section class="list-card"><h3>Invitations</h3><div id="invitation-list" class="item-list"><p class="muted">No invitations waiting.</p></div></section>
+        <section class="list-card"><h3>Your games</h3><div id="game-list" class="item-list"><p class="muted">No active games.</p></div></section>
+      </div>
+    </section>
+    <section id="invite-share" class="invite-share hidden" aria-label="Room invitation">
+      <label for="invite-url">Your invite link</label>
+      <div class="join-row">
+        <input id="invite-url" type="text" readonly aria-describedby="invite-help">
+        <button id="copy-invite" class="button" type="button">Copy link</button>
+      </div>
+      <p id="invite-help" class="hint">Share this link with your opponent. It stays in this box instead of overflowing the page.</p>
+    </section>
+    <p id="message" class="message" role="status" aria-live="polite"></p>
+    <footer>Move grades are estimates, not engine analysis.</footer>
+  </main>
+</body>
+</html>
