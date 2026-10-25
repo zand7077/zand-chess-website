@@ -9,6 +9,7 @@ let signedInUser = null;
 let friendIds = new Set();
 let dashboardTimer = null;
 let inviteUrl = "";
+let inviteTimeResolver = null;
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -40,6 +41,49 @@ function item(container, label, actionLabel, action, primary = false) {
   name.textContent = label;
   row.append(name, button(actionLabel, action, primary));
   container.append(row);
+}
+
+function closeInviteTimePicker(timeControl = null) {
+  document.querySelector("#invite-time-modal").classList.add("hidden");
+  if (inviteTimeResolver) {
+    inviteTimeResolver(timeControl);
+    inviteTimeResolver = null;
+  }
+}
+
+function openInviteTimePicker(username) {
+  const modal = document.querySelector("#invite-time-modal");
+  const options = document.querySelector("#invite-time-options");
+  const selectedValue = document.querySelector("#time-control").value;
+  options.replaceChildren();
+  for (const group of document.querySelector("#time-control").querySelectorAll("optgroup")) {
+    const section = document.createElement("fieldset");
+    section.className = "invite-time-group";
+    const legend = document.createElement("legend");
+    legend.textContent = group.label;
+    section.append(legend);
+    for (const option of group.querySelectorAll("option")) {
+      const label = document.createElement("label");
+      label.className = "invite-time-option";
+      const radio = document.createElement("input");
+      radio.type = "radio";
+      radio.name = "invite-time-control";
+      radio.value = option.value;
+      radio.checked = option.value === selectedValue;
+      const description = document.createElement("span");
+      description.textContent = option.textContent;
+      label.append(radio, description);
+      section.append(label);
+    }
+    options.append(section);
+  }
+  document.querySelector("#invite-time-opponent").textContent =
+    `Choose a clock for your game with ${username}.`;
+  modal.classList.remove("hidden");
+  modal.querySelector('input[type="radio"]:checked')?.focus();
+  return new Promise((resolve) => {
+    inviteTimeResolver = resolve;
+  });
 }
 
 function leaderboardEntry(container, leader) {
@@ -207,11 +251,13 @@ async function loadDashboard() {
     for (const friend of data.friends) {
       item(friends, `${friend.username} · ${friend.rating} ELO`, "Invite", async () => {
         try {
+          const timeControl = await openInviteTimePicker(friend.username);
+          if (!timeControl) return;
           const invite = await api("/api/invitations", {
             method: "POST",
             body: JSON.stringify({
               friendId: friend.id,
-              timeControl: document.querySelector("#time-control").value,
+              timeControl,
             }),
           });
           tell(`Invitation sent to ${friend.username}.`);
@@ -385,6 +431,31 @@ document.querySelector("#friend-form").addEventListener("submit", async (event) 
     tell(result.status === "friends" ? "Friend request accepted." : "Friend request sent.");
     await loadDashboard();
   } catch (error) { tell(error.message); }
+});
+
+document.querySelector("#invite-time-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const selected = document.querySelector('input[name="invite-time-control"]:checked');
+  if (!selected) {
+    tell("Choose a time control before sending the invitation.");
+    return;
+  }
+  closeInviteTimePicker(selected.value);
+});
+document.querySelector("#cancel-invite-time").addEventListener("click", () => {
+  closeInviteTimePicker();
+});
+document.querySelector("#close-invite-time").addEventListener("click", () => {
+  closeInviteTimePicker();
+});
+document.querySelector("#invite-time-modal").addEventListener("click", (event) => {
+  if (event.target.id === "invite-time-modal") closeInviteTimePicker();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" &&
+      !document.querySelector("#invite-time-modal").classList.contains("hidden")) {
+    closeInviteTimePicker();
+  }
 });
 
 api("/api/session")

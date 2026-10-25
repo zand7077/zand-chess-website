@@ -87,6 +87,17 @@ input:focus, select:focus { outline: 2px solid #a6503d66; border-color: var(--ac
 .profile-game-detail strong,.profile-game-detail small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .profile-game-detail small { color: var(--muted); font-size: 10px; }
 .profile-rating-change { text-align: right; font: 700 11px "DM Mono",monospace; }
+.invite-time-modal { position: fixed; z-index: 30; inset: 0; display: grid; place-items: center; padding: 18px; background: #17161480; }
+.invite-time-card { position: relative; width: min(480px,100%); max-height: min(760px,92vh); overflow: auto; padding: 24px; border: 1px solid var(--edge); border-radius: 14px; background: linear-gradient(145deg,#fffefa,var(--panel)); box-shadow: 0 20px 60px #080a0d55; }
+.invite-time-card h2 { margin: 6px 42px 4px 0; font-size: 22px; }
+.invite-time-card>p { margin-bottom: 15px; }
+.invite-time-options { display: grid; gap: 13px; }
+.invite-time-group { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 7px; min-width: 0; margin: 0; border: 0; padding: 0; }
+.invite-time-group legend { grid-column: 1 / -1; margin-bottom: 2px; color: var(--muted); font-size: 10px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+.invite-time-option { display: flex; align-items: center; gap: 9px; min-width: 0; padding: 10px; border: 1px solid var(--edge); border-radius: 8px; background: #ffffffb8; cursor: pointer; font-size: 12px; }
+.invite-time-option:has(input:checked) { border-color: var(--accent); background: #a6503d12; box-shadow: 0 0 0 1px #a6503d33; }
+.invite-time-option input { width: 16px; height: 16px; flex: 0 0 auto; margin: 0; accent-color: var(--accent); }
+.invite-time-actions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 18px; }
 .time-control-picker { min-width: 0; }
 .time-control-picker select { display: block; margin-top: 2px; }
 .list-item { display: flex; justify-content: space-between; align-items: center; gap: 8px; border-top: 1px solid #e6e2d9; padding-top: 8px; font-size: 12px; }
@@ -105,4 +116,5 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outlin
   .invite-share .join-row { grid-template-columns: minmax(0, 1fr); }
   .leaderboard-panel { padding: 15px; }
   .profile-card { padding: 20px 15px; }
+  .invite-time-card { padding: 21px 15px; }
 }
