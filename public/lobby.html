@@ -62,14 +62,29 @@
       <p class="hint">Choose a clock for both players. No account is needed to play in a room.</p>
     </section>
 
-    <section class="leaderboard-panel">
-      <div class="section-title">
-        <div><span class="eyebrow">THE TOP PLAYERS</span><h2>Leaderboard</h2></div>
-        <span class="muted">Top 10 by Elo</span>
+    <section class="community-panel">
+      <div class="community-tabs" role="tablist" aria-label="Community">
+        <button id="leaderboard-tab" class="community-tab selected" type="button" role="tab" aria-selected="true" aria-controls="leaderboard-panel">Leaderboard</button>
+        <button id="live-matches-tab" class="community-tab" type="button" role="tab" aria-selected="false" aria-controls="live-matches-panel">Live matches</button>
       </div>
-      <div id="leaderboard-list" class="leaderboard-list" aria-live="polite">
-        <p class="muted">Loading leaderboard…</p>
-      </div>
+      <section id="leaderboard-panel" class="community-tab-panel" role="tabpanel" aria-labelledby="leaderboard-tab">
+        <div class="section-title">
+          <div><span class="eyebrow">THE TOP PLAYERS</span><h2>Leaderboard</h2></div>
+          <span class="muted">Top 10 by Elo</span>
+        </div>
+        <div id="leaderboard-list" class="leaderboard-list" aria-live="polite">
+          <p class="muted">Loading leaderboard…</p>
+        </div>
+      </section>
+      <section id="live-matches-panel" class="community-tab-panel hidden" role="tabpanel" aria-labelledby="live-matches-tab">
+        <div class="section-title">
+          <div><span class="eyebrow">WATCH THE ACTION</span><h2>Live matches</h2></div>
+          <span class="muted">Updates automatically</span>
+        </div>
+        <div id="live-matches-list" class="live-matches-list" aria-live="polite">
+          <p class="muted">Loading live matches…</p>
+        </div>
+      </section>
     </section>
 
     <section id="friends-panel" class="friends-panel hidden">

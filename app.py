@@ -537,6 +537,34 @@ def session_info():
     return jsonify(user=user_json(current_user()))
 
 
+@bp.get("/api/live-matches")
+def live_matches():
+    matches = database().execute(
+        """
+        SELECT g.room_code, white.username AS white_name,
+            black.username AS black_name, g.time_control, g.moves_json
+        FROM games g
+        LEFT JOIN users white ON white.id = g.white_user_id
+        LEFT JOIN users black ON black.id = g.black_user_id
+        WHERE g.status = 'active'
+        ORDER BY g.created_at DESC
+        LIMIT 50
+        """
+    ).fetchall()
+    return jsonify(matches=[
+        {
+            "roomCode": match["room_code"],
+            "whiteName": match["white_name"] or "Guest",
+            "blackName": match["black_name"] or "Guest",
+            "timeControl": TIME_CONTROLS.get(
+                match["time_control"], TIME_CONTROLS["rapid_10_0"]
+            )["label"],
+            "movesPlayed": len(json.loads(match["moves_json"])),
+        }
+        for match in matches
+    ])
+
+
 @bp.get("/api/leaderboard")
 def leaderboard():
     leaders = database().execute(
@@ -975,7 +1003,8 @@ def synchronize_room_clock(room: sqlite3.Row, now_ms: int) -> sqlite3.Row:
             )
         return load_room(room["room_code"])
 
-    if all(present.values()) and started_at is None:
+    moves = json.loads(room["moves_json"])
+    if all(present.values()) and started_at is None and moves:
         database().execute(
             "UPDATE games SET clock_started_at = ? WHERE id = ?",
             (now_ms, room["id"]),
@@ -1298,6 +1327,18 @@ def get_room_state(code: str):
         return failure
     room = update_room_presence(code.upper(), side, True)
     return jsonify(room_snapshot(room, side))
+
+
+@bp.get("/api/rooms/<code>/spectate")
+def spectate_room(code: str):
+    room = load_room(code.upper())
+    if room is None:
+        return error("That room could not be found.", 404)
+    if room["status"] not in ("active", "completed"):
+        return error("That match is not live.", 409)
+    snapshot = room_snapshot(room, "w")
+    snapshot["spectating"] = True
+    return jsonify(snapshot)
 
 
 @bp.post("/api/rooms/<code>/leave")

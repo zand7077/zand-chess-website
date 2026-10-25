@@ -195,6 +195,41 @@ async function loadLeaderboard() {
   }
 }
 
+async function loadLiveMatches() {
+  const container = document.querySelector("#live-matches-list");
+  try {
+    const { matches } = await api("/api/live-matches");
+    container.replaceChildren();
+    if (!matches.length) {
+      container.innerHTML = '<p class="muted">No live matches right now. Check back soon.</p>';
+      return;
+    }
+    for (const match of matches) {
+      const row = document.createElement("div");
+      row.className = "live-match-item";
+      const detail = document.createElement("div");
+      detail.className = "live-match-detail";
+      const players = document.createElement("strong");
+      players.textContent = `${match.whiteName} vs ${match.blackName}`;
+      const meta = document.createElement("span");
+      const moves = match.movesPlayed === 1 ? "1 move" : `${match.movesPlayed} moves`;
+      meta.textContent = `${match.timeControl} · ${moves}`;
+      detail.append(players, meta);
+      row.append(detail, button("Spectate", () => {
+        window.location.href =
+          `/play?room=${encodeURIComponent(match.roomCode)}&spectate=1`;
+      }, true));
+      container.append(row);
+    }
+  } catch (error) {
+    container.replaceChildren();
+    const status = document.createElement("p");
+    status.className = "muted";
+    status.textContent = error.message;
+    container.append(status);
+  }
+}
+
 function formatProfileDate(value) {
   const date = new Date(value);
   return Number.isNaN(date.getTime())
@@ -289,7 +324,7 @@ async function loadDashboard() {
           });
           tell(`Invitation sent to ${friend.username}.`);
           await copyInvite(invite.roomCode);
-          await loadDashboard();
+          window.location.href = `/play?room=${encodeURIComponent(invite.roomCode)}`;
         } catch (error) { tell(error.message); }
       }, true);
     }
@@ -514,6 +549,20 @@ document.querySelector("#close-invite-time").addEventListener("click", () => {
 document.querySelector("#invite-time-modal").addEventListener("click", (event) => {
   if (event.target.id === "invite-time-modal") closeInviteTimePicker();
 });
+for (const [tabId, panelId, otherTabId, otherPanelId] of [
+  ["leaderboard-tab", "leaderboard-panel", "live-matches-tab", "live-matches-panel"],
+  ["live-matches-tab", "live-matches-panel", "leaderboard-tab", "leaderboard-panel"],
+]) {
+  document.querySelector(`#${tabId}`).addEventListener("click", () => {
+    document.querySelector(`#${tabId}`).classList.add("selected");
+    document.querySelector(`#${tabId}`).setAttribute("aria-selected", "true");
+    document.querySelector(`#${otherTabId}`).classList.remove("selected");
+    document.querySelector(`#${otherTabId}`).setAttribute("aria-selected", "false");
+    document.querySelector(`#${panelId}`).classList.remove("hidden");
+    document.querySelector(`#${otherPanelId}`).classList.add("hidden");
+    if (tabId === "live-matches-tab") void loadLiveMatches();
+  });
+}
 document.querySelector("#join-prompt-join").addEventListener("click", async () => {
   if (!activeInvitationPrompt) return;
   const invite = activeInvitationPrompt;
@@ -545,3 +594,5 @@ document.addEventListener("keydown", (event) => {
 api("/api/session")
   .then(({ user }) => setAccountView(user))
   .catch((error) => tell(error.message));
+void loadLiveMatches();
+window.setInterval(loadLiveMatches, 5000);

@@ -30,6 +30,10 @@ The lobby displays the top 10 accounts by Elo. Select a player to view their
 rating, account age, match record, and recent completed games, or send a friend
 request.
 
+Friend invitations open the new room for the sender while the invited player
+accepts. The community tabs also list active live matches; choose **Spectate**
+to watch a game without joining it or affecting either player's clock.
+
 Usernames must be 3–20 letters, numbers, or underscores. Passwords must be at
 least 10 characters. Friend requests must be accepted before either player can
 send a friend invitation. New accounts start at 800 Elo. For games between two
@@ -38,11 +42,13 @@ win, loss, draw, flag, or forfeit using the standard Elo expected-score formula
 (K-factor 32). Guest games do not change account ratings.
 
 Games offer bullet, blitz, and rapid clocks with per-player time and Fischer
-increments. Clocks start once both players have opened the game and pause when
-either leaves; a short heartbeat grace period covers temporary connection
-interruptions. Each player's clock is enforced by the server; a player who runs
-out of time loses. Boards stay oriented from each player's perspective instead
-of flipping every turn. Either player can request a rematch after a game; the
+increments. White's clock starts on White's first move. After that, clocks pause
+when either player leaves; a short heartbeat grace period covers temporary
+connection interruptions. Each player's clock is enforced by the server; a
+player who runs out of time loses. Boards stay oriented from each player's
+perspective instead of flipping every turn. Either player can request a rematch
+after a game; players can queue a premove during the opponent's turn, which is
+submitted automatically and validated when their turn begins. The
 new game begins only when the other player accepts.
 
 Move grades and position evaluations use the Stockfish 19 Lite single-threaded

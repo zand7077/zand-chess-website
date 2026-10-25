@@ -20,7 +20,9 @@ const toastElement = document.querySelector("#toast");
 const state = {
   game: null,
   roomCode: new URLSearchParams(window.location.search).get("room")?.toUpperCase() || "",
+  isSpectator: new URLSearchParams(window.location.search).get("spectate") === "1",
   selected: null,
+  premove: null,
   flipped: false,
   orientationInitialized: false,
   clockSyncAt: Date.now(),
@@ -256,6 +258,8 @@ function setBoardOrientation() {
         square.classList.add("last-move");
       }
       if (state.selected === name) square.classList.add("selected");
+      if (state.premove?.from === name) square.classList.add("premove-from");
+      if (state.premove?.to === name) square.classList.add("premove-to");
       if (currentKing === name) square.classList.add("check");
       if (state.game.legalMoves.some((move) => move.from === state.selected && move.to === name)) {
         square.classList.add("capture-target");
@@ -271,8 +275,8 @@ function setBoardOrientation() {
         ? `piece ${pieceCode[0] === "w" ? "white" : "black"}`
         : "piece";
       parts.piece.draggable = Boolean(pieceCode) && !state.busy &&
-        !state.game.over && state.game.status === "active" &&
-        state.game.playerSide === state.game.turn && pieceCode[0] === state.game.turn;
+        !state.isSpectator && !state.game.over && state.game.status === "active" &&
+        pieceCode[0] === state.game.playerSide;
     }
   }
 }
@@ -428,24 +432,31 @@ function renderTurn() {
   currentStrip.classList.remove("opponent-strip");
   opponentStrip.classList.add("opponent-strip");
   opponentStrip.classList.remove("current-strip");
-  currentStrip.querySelector(".player-meta small").textContent = "YOU";
-  opponentStrip.querySelector(".player-meta small").textContent = "OPPONENT";
+  currentStrip.querySelector(".player-meta small").textContent =
+    state.isSpectator ? "WHITE" : "YOU";
+  opponentStrip.querySelector(".player-meta small").textContent =
+    state.isSpectator ? "BLACK" : "OPPONENT";
   document.querySelector("#white-name").textContent = state.game.whiteName.toUpperCase();
   document.querySelector("#black-name").textContent = state.game.blackName.toUpperCase();
   document.querySelector("#white-rating").textContent = `${state.game.whiteRating} ELO`;
   document.querySelector("#black-rating").textContent = `${state.game.blackRating} ELO`;
-  document.querySelector("#room-label").textContent = `ROOM ${state.game.roomCode}`;
+  document.querySelector("#room-label").textContent =
+    `${state.isSpectator ? "SPECTATING" : "ROOM"} ${state.game.roomCode}`;
   document.querySelector("#time-control-label").textContent = state.game.timeControl;
   renderClocks();
   document.querySelector("#turn-name").textContent =
     state.game.over ? "MATCH COMPLETE" : `${white ? "WHITE" : "BLACK"} TO MOVE`;
   document.querySelector("#turn-subtitle").textContent =
-    state.game.result || (state.game.status === "waiting"
+    state.game.result || (state.isSpectator
+      ? "You are watching this live match."
+      : state.game.status === "waiting"
       ? "Waiting for your opponent to join."
       : state.game.status === "active" && state.game.clockStartedAt === null
-        ? "Clock paused until both players are in the game."
+        ? state.game.history.length === 0
+          ? "White's clock starts when White makes the first move."
+          : "Clock paused until both players are in the game."
         : state.game.playerSide !== state.game.turn
-          ? "Waiting for your opponent's move."
+          ? "Waiting for your opponent. Select a piece and destination to premove."
           : state.game.check ? "King is in check." : "Select a piece to move.");
   document.querySelector("#turn-piece").textContent = white ? "♙" : "♟";
   document.querySelector("#check-banner").classList.toggle("hidden", !state.game.check || state.game.over);
@@ -453,6 +464,8 @@ function renderTurn() {
 
 function render() {
   if (!state.game) return;
+  document.querySelector("#spectator-banner").classList.toggle("hidden", !state.isSpectator);
+  document.querySelector(".action-row").classList.toggle("hidden", state.isSpectator);
   renderBoard();
   renderTurn();
   renderHistory();
@@ -467,13 +480,13 @@ function render() {
   const waitingModal = document.querySelector("#waiting-modal");
   waitingModal.classList.toggle(
     "hidden",
-    state.game.status !== "waiting" || state.game.playerSide !== "w",
+    state.isSpectator || state.game.status !== "waiting" || state.game.playerSide !== "w",
   );
   document.querySelector("#waiting-room-code").textContent = state.game.roomCode;
   const rematchModal = document.querySelector("#rematch-modal");
   const rematchRequestedBy = state.game.rematchRequestedBy;
   const isRematchRequester = rematchRequestedBy === state.game.playerSide;
-  rematchModal.classList.toggle("hidden", !rematchRequestedBy);
+  rematchModal.classList.toggle("hidden", state.isSpectator || !rematchRequestedBy);
   document.querySelector("#rematch-title").textContent = isRematchRequester
     ? "Rematch requested"
     : "Your opponent wants a rematch";
@@ -483,7 +496,7 @@ function render() {
   document.querySelector("#accept-rematch").classList.toggle("hidden", isRematchRequester);
   document.querySelector("#decline-rematch").textContent =
     isRematchRequester ? "Cancel request" : "Decline";
-  if (state.game.over && !state.modalShown) {
+  if (!state.isSpectator && state.game.over && !state.modalShown) {
     state.modalShown = true;
     openEloModal(state.game.result);
   }
@@ -522,6 +535,11 @@ async function updateGame(next, animate = false) {
   const previousGameOver = state.game?.over || false;
   const previousHistory = state.game?.history || [];
   const previousPly = state.game?.history.length || 0;
+  if (next.over || next.status !== "active" ||
+      next.history.length < previousHistory.length) {
+    state.premove = null;
+    state.selected = null;
+  }
   const highlightedGrade = state.game
     ? newlyHighlightedGrade(previousHistory, next.history)
     : null;
@@ -538,9 +556,16 @@ async function updateGame(next, animate = false) {
   render();
   if (highlightedGrade) showGradePopup(highlightedGrade);
   if (animate && next.lastMove?.captured && next.lastMove !== oldLastMove) animateCapture();
+  if (state.premove && next.status === "active" && !next.over &&
+      next.playerSide === next.turn) {
+    const premove = state.premove;
+    state.premove = null;
+    state.selected = null;
+    void sendMove(premove.from, premove.to, premove.promotion, true);
+  }
 }
 
-async function sendMove(from, to, promotion) {
+async function sendMove(from, to, promotion, isPremove = false) {
   if (state.busy) return;
   state.busy = true;
   state.selected = null;
@@ -556,7 +581,7 @@ async function sendMove(from, to, promotion) {
     });
     if (next.check && !next.over) showToast("Check! Protect your king.");
   } catch (error) {
-    showToast(error.message);
+    showToast(isPremove ? `Premove cancelled: ${error.message}` : error.message);
   } finally {
     state.busy = false;
     renderBoard();
@@ -565,8 +590,40 @@ async function sendMove(from, to, promotion) {
 }
 
 async function onSquareClick(name) {
-  if (!name || !state.game || state.game.over || state.busy) return;
-  if (state.game.status !== "active" || state.game.playerSide !== state.game.turn) return;
+  if (state.isSpectator || !name || !state.game || state.game.over || state.busy) return;
+  if (state.game.status !== "active") return;
+  const isOurTurn = state.game.playerSide === state.game.turn;
+  if (!isOurTurn) {
+    const piece = state.game.board[squareCoords(name).row][squareCoords(name).col];
+    if (state.premove?.from === name) {
+      state.premove = null;
+      state.selected = null;
+      showToast("Premove cancelled.");
+      renderBoard();
+      return;
+    }
+    if (piece?.[0] === state.game.playerSide) {
+      state.premove = null;
+      state.selected = name;
+      renderBoard();
+      return;
+    }
+    if (state.selected) {
+      const from = state.selected;
+      const fromCoords = squareCoords(from);
+      const fromPiece = state.game.board[fromCoords.row][fromCoords.col];
+      if (fromPiece?.[0] === state.game.playerSide && from !== name) {
+        const promotionRank = state.game.playerSide === "w" ? "8" : "1";
+        const promotion = fromPiece[1] === "p" && name[1] === promotionRank ? "q" : undefined;
+        state.premove = { from, to: name, promotion };
+        state.selected = null;
+        showToast("Premove queued. Click its piece to cancel.");
+        renderBoard();
+        return;
+      }
+    }
+    return;
+  }
   const piece = state.game.board[squareCoords(name).row][squareCoords(name).col];
   if (!state.selected) {
     if (piece?.[0] === state.game.turn) {
@@ -736,12 +793,16 @@ function renderClocks() {
   const playerClock = state.game.playerSide === "w"
     ? state.game.whiteTimeMs - (state.game.turn === "w" ? elapsed : 0)
     : state.game.blackTimeMs - (state.game.turn === "b" ? elapsed : 0);
-  const oneMinuteWarning = state.game.status === "active" && !state.game.over &&
+  const oneMinuteWarning = !state.isSpectator &&
+    state.game.status === "active" && state.game.clockStartedAt !== null &&
+    !state.game.over &&
     playerClock <= 60000 && playerClock > 20000;
   const minuteWarning = document.querySelector("#time-warning");
   minuteWarning.classList.toggle("hidden", !oneMinuteWarning);
   minuteWarning.setAttribute("aria-hidden", String(!oneMinuteWarning));
-  const warningActive = state.game.status === "active" && !state.game.over &&
+  const warningActive = !state.isSpectator &&
+    state.game.status === "active" && state.game.clockStartedAt !== null &&
+    !state.game.over &&
     playerClock <= 20000;
   const warning = document.querySelector("#low-time-warning");
   warning.classList.toggle("hidden", !warningActive);
@@ -794,6 +855,12 @@ function confirmInvitation() {
 
 async function loadInitialGame() {
   let initial;
+  if (state.isSpectator) {
+    initial = await api(roomApiPath("/spectate"));
+    state.startedAt = Date.now();
+    await updateGame(initial);
+    return;
+  }
   try {
     initial = await api(roomApiPath());
   } catch (error) {
@@ -812,7 +879,7 @@ document.querySelector("#elo-modal").addEventListener("click", (event) => {
   if (event.target.id === "elo-modal") event.currentTarget.classList.add("hidden");
 });
 window.addEventListener("pagehide", () => {
-  if (!state.roomCode || !state.game || state.game.status === "completed") return;
+  if (state.isSpectator || !state.roomCode || !state.game || state.game.status === "completed") return;
   const body = new Blob(["{}"], { type: "application/json" });
   navigator.sendBeacon(roomApiPath("/leave"), body);
 });
@@ -829,7 +896,7 @@ if (!state.roomCode) {
 window.setInterval(async () => {
   if (!state.roomCode || !state.game || state.busy) return;
   try {
-    const next = await api(roomApiPath());
+    const next = await api(roomApiPath(state.isSpectator ? "/spectate" : ""));
     if (next.history.length !== state.game.history.length ||
         next.status !== state.game.status || next.result !== state.game.result ||
         next.clockStartedAt !== state.game.clockStartedAt ||

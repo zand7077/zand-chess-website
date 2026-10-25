@@ -31,6 +31,7 @@ button { color: inherit; }
 .live-dot, .turn-signal i { width: 7px; height: 7px; border-radius: 50%; background: var(--cyan); }
 .arena { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 32px; padding: 28px 0 35px; align-items: center; }
 .board-column { min-width: 0; width: min(100%, calc(100vh - 175px)); justify-self: center; }
+.spectator-banner { margin: 0 0 7px; padding: 7px 10px; border: 1px solid #9a713d55; border-radius: 4px; color: #614722; background: #f4e6c9; font: 800 9px "DM Mono",monospace; letter-spacing: .12em; text-align: center; }
 .player-strip { min-height: 55px; display: flex; align-items: center; gap: 11px; padding: 5px 8px; }
 .player-avatar { width: 37px; height: 37px; display: grid; place-items: center; border: 1px solid var(--panel-edge); border-radius: 5px; font: 27px "Segoe UI Symbol", sans-serif; background: var(--panel); }
 .avatar-dark { color: #34363b; }
@@ -52,6 +53,8 @@ button { color: inherit; }
 .square:hover { filter: brightness(1.035); }
 .square.last-move::after { content: ""; position: absolute; inset: 0; z-index: 0; background: rgba(210,151,75,.27); pointer-events: none; }
 .square.selected { box-shadow: inset 0 0 0 3px #a6503d; z-index: 1; }
+.square.premove-from { box-shadow: inset 0 0 0 3px #765b83; }
+.square.premove-to { box-shadow: inset 0 0 0 3px #765b83aa; background-image: repeating-linear-gradient(135deg,transparent 0 7px,#765b8330 7px 12px); }
 .square.check { background: #b96258; }
 .coordinate { position: absolute; z-index: 2; top: 4px; left: 5px; color: rgba(25,31,52,.58); font: 700 clamp(8px,1vw,12px) "DM Mono",monospace; pointer-events: none; }
 .coordinate.file { top: auto; right: 5px; bottom: 3px; left: auto; }
