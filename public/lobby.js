@@ -350,11 +350,32 @@ async function loadDashboard() {
       const continueButton = button(
         game.status === "waiting" ? "View room" : "Rejoin game",
         () => {
-        window.location.href = `/play?room=${encodeURIComponent(game.room_code)}`;
+          window.location.href = `/play?room=${encodeURIComponent(game.room_code)}`;
         },
         true,
       );
-      row.append(details, continueButton);
+      const closeButton = button("Close room", async () => {
+        const confirmation = game.status === "active"
+          ? "Close this active game? This will forfeit the match and may change both players’ ratings."
+          : "Close this waiting room? Your opponent will no longer be able to join.";
+        if (!window.confirm(confirmation)) return;
+        closeButton.disabled = true;
+        try {
+          await api(`/api/rooms/${encodeURIComponent(game.room_code)}/close`, {
+            method: "POST",
+            body: "{}",
+          });
+          tell(game.status === "active"
+            ? "Game closed and recorded as a forfeit."
+            : "Waiting room closed.");
+          await loadDashboard();
+        } catch (error) {
+          tell(error.message);
+          closeButton.disabled = false;
+        }
+      });
+      closeButton.classList.add("danger");
+      row.append(details, continueButton, closeButton);
       games.append(row);
     }
   } catch (error) {

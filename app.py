@@ -1309,6 +1309,55 @@ def leave_room(code: str):
     return jsonify(ok=True)
 
 
+@bp.post("/api/rooms/<code>/close")
+def close_room(code: str):
+    room, side, failure = authorized_room(code)
+    if failure:
+        return failure
+    connection = database()
+    connection.execute("BEGIN IMMEDIATE")
+    room = load_room(code.upper(), for_update=True)
+    side = room_side(room, current_user(), guest_id()) if room else None
+    if room is None or side is None:
+        connection.rollback()
+        return error("You are not a player in this room.", 403)
+    if room["status"] == "waiting":
+        if side != "w":
+            connection.rollback()
+            return error("Only the room creator can close a waiting room.", 403)
+        connection.execute(
+            """
+            UPDATE games SET status = 'completed', result = 'Room closed by creator',
+                clock_started_at = NULL, rematch_requested_by = NULL
+            WHERE id = ? AND status = 'waiting'
+            """,
+            (room["id"],),
+        )
+        connection.commit()
+        return jsonify(ok=True, status="completed")
+    if room["status"] != "active":
+        connection.rollback()
+        return error("This room is already closed.", 409)
+    now_ms = int(time.time() * 1000)
+    room = synchronize_room_clock(room, now_ms)
+    if room["status"] != "active":
+        connection.commit()
+        return jsonify(ok=True, status="completed", result=room["result"])
+    result = "Black wins by forfeit" if side == "w" else "White wins by forfeit"
+    white_ms, black_ms = remaining_clocks(room, now_ms)
+    connection.execute(
+        """
+        UPDATE games SET status = 'completed', result = ?, white_time_ms = ?,
+            black_time_ms = ?, clock_started_at = NULL, rematch_requested_by = NULL
+        WHERE id = ? AND status = 'active'
+        """,
+        (result, white_ms, black_ms, room["id"]),
+    )
+    rate_completed_game(connection, room, result)
+    connection.commit()
+    return jsonify(ok=True, status="completed", result=result)
+
+
 @bp.post("/api/rooms/<code>/move")
 def make_move(code: str):
     room, side, failure = authorized_room(code)
