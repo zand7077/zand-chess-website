@@ -9,12 +9,12 @@
   font-family: "Segoe UI", Arial, sans-serif;
 }
 * { box-sizing: border-box; }
-body { min-width: 320px; min-height: 100vh; margin: 0; color: var(--text); background: var(--ink); }
-button, input, textarea { font: inherit; }
+body { min-width: 320px; min-height: 100vh; margin: 0; color: var(--text); background-color: var(--ink); background-image: radial-gradient(ellipse at 15% 15%, #34483b44, transparent 34%), radial-gradient(ellipse at 90% 70%, #76533133, transparent 38%), repeating-linear-gradient(45deg, transparent 0 42px, #ffffff06 43px 44px); }
+button, input, textarea, select { font: inherit; }
 .lobby-shell { width: min(920px, calc(100% - 40px)); margin: 0 auto; }
 .lobby-header { height: 76px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--edge); }
 .brand { display: flex; gap: 10px; align-items: center; color: inherit; text-decoration: none; }
-.brand-mark { width: 40px; height: 40px; display: grid; place-items: center; border: 1px solid #393b40; border-radius: 5px; color: #f5f2eb; background: #303237; font-size: 23px; }
+.brand-mark { width: 40px; height: 40px; display: grid; place-items: center; border: 1px solid #393b40; border-radius: 8px; color: #f5f2eb; background: #303237; font-size: 23px; }
 .brand-copy { display: grid; gap: 2px; letter-spacing: .14em; }
 .brand-copy b { font-size: 12px; }
 .brand-copy small, .eyebrow { color: var(--muted); font-size: 9px; font-weight: 800; letter-spacing: .16em; }
@@ -22,26 +22,28 @@ button, input, textarea { font: inherit; }
 .account-panel { display: grid; grid-template-columns: 1fr 300px; gap: 40px; align-items: center; padding: 45px 0 35px; border-bottom: 1px solid var(--edge); }
 .intro h1 { max-width: 480px; margin: 8px 0; font-size: clamp(30px, 5vw, 48px); letter-spacing: -.04em; }
 .intro p, .hint { color: var(--muted); line-height: 1.6; }
-.account-card, .list-card, .play-panel { border: 1px solid var(--edge); border-radius: 6px; background: var(--panel); }
+.account-card, .list-card, .play-panel { border: 1px solid var(--edge); border-radius: 12px; background: linear-gradient(145deg, #fffefa, var(--panel)); box-shadow: 0 14px 32px #080a0d18; }
 .account-card { padding: 20px; }
 h2, h3, p { margin-top: 0; }
 .account-card h2, .section-title h2, .welcome-row h2 { margin: 5px 0 15px; font-size: 19px; }
 form { display: grid; gap: 12px; }
 label { display: grid; gap: 6px; color: #5e5d58; font-size: 11px; font-weight: 700; }
-input { width: 100%; min-width: 0; border: 1px solid var(--edge); border-radius: 4px; padding: 10px; color: var(--text); background: #fffefa; }
-input:focus { outline: 2px solid #a6503d66; border-color: var(--accent); }
-.button { border: 1px solid var(--edge); border-radius: 4px; padding: 10px 14px; color: var(--text); background: #fffefa; cursor: pointer; font-weight: 700; }
+input, select { width: 100%; min-width: 0; border: 1px solid var(--edge); border-radius: 6px; padding: 10px; color: var(--text); background: #fffefa; }
+input:focus, select:focus { outline: 2px solid #a6503d66; border-color: var(--accent); }
+.button { border: 1px solid var(--edge); border-radius: 6px; padding: 10px 14px; color: var(--text); background: #fffefa; cursor: pointer; font-weight: 700; }
 .button.primary { border-color: #303237; color: #fffefa; background: #303237; }
 .button:hover { filter: brightness(.96); }
 .button:disabled { opacity: .55; cursor: wait; }
 .quiet { padding: 8px 12px; }
 .text-button { display: block; margin: 13px auto 0; border: 0; padding: 4px; color: var(--accent); background: transparent; cursor: pointer; font-size: 12px; }
 .play-panel { margin: 24px 0; padding: 20px; }
-.invite-share { display: grid; gap: 8px; width: min(100%, 560px); margin: 0 auto 18px; padding: 16px; border: 1px solid var(--edge); border-radius: 6px; background: var(--panel); }
-.invite-share .join-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; min-width: 0; }
-.invite-share textarea { display: block; width: 100%; min-width: 0; max-width: 100%; resize: vertical; overflow-wrap: anywhere; word-break: break-all; font-size: clamp(9px, 2.5vw, 12px); line-height: 1.4; }
+.invite-share, .invite-share * { min-width: 0; }
+.invite-share { display: grid; gap: 8px; width: min(100%, 560px); margin: 0 auto 18px; padding: 16px; border: 1px solid var(--edge); border-radius: 10px; background: var(--panel); }
+.invite-share .join-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(84px, auto); width: 100%; max-width: 100%; gap: 8px; }
+.invite-share textarea { display: block; width: 100%; min-width: 0; max-width: 100%; height: 48px; margin: 0; border: 1px solid var(--edge); border-radius: 6px; padding: 8px; resize: none; overflow: hidden; overflow-wrap: anywhere; word-break: break-all; color: var(--text); background: #fffefa; font-size: clamp(8px, 1.8vw, 10px); line-height: 1.35; }
+.invite-share .button { min-width: 0; padding: 8px 10px; white-space: normal; font-size: 11px; }
 .invite-share .hint { margin: 0; }
-.quick-play { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: end; }
+.quick-play { display: grid; grid-template-columns: minmax(160px, .8fr) minmax(160px, 1fr) minmax(230px, 1.3fr); gap: 16px; align-items: end; }
 .join-row { display: flex; gap: 8px; }
 .join-row input { flex: 1; }
 .hint { margin: 12px 0 0; font-size: 12px; }
@@ -53,7 +55,10 @@ input:focus { outline: 2px solid #a6503d66; border-color: var(--accent); }
 .list-card { min-height: 112px; padding: 15px; }
 .list-card h3 { margin-bottom: 11px; font-size: 14px; }
 .item-list { display: grid; gap: 8px; }
+.time-control-picker { min-width: 0; }
+.time-control-picker select { display: block; margin-top: 2px; }
 .list-item { display: flex; justify-content: space-between; align-items: center; gap: 8px; border-top: 1px solid #e6e2d9; padding-top: 8px; font-size: 12px; }
+.list-item > span { min-width: 0; overflow-wrap: anywhere; }
 .list-item .button { padding: 6px 9px; font-size: 11px; white-space: nowrap; }
 .muted { color: var(--muted); font-size: 12px; }
 .message { min-height: 22px; max-width: 100%; color: var(--accent); font-size: 13px; overflow-wrap: anywhere; }

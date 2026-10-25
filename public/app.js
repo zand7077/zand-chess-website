@@ -22,6 +22,10 @@ const state = {
   roomCode: new URLSearchParams(window.location.search).get("room")?.toUpperCase() || "",
   selected: null,
   flipped: false,
+  orientationInitialized: false,
+  clockSyncAt: Date.now(),
+  engineReady: null,
+  enginePending: null,
   busy: false,
   startedAt: Date.now(),
   modalShown: false,
@@ -32,6 +36,90 @@ const state = {
 const squares = new Map();
 const gridSquares = new Map();
 const squareParts = new Map();
+const stockfish = new Worker("/engine/stockfish-19-lite-single.js");
+
+state.engineReady = new Promise((resolve, reject) => {
+  const timeout = window.setTimeout(
+    () => reject(new Error("Stockfish took too long to start.")),
+    15000,
+  );
+  stockfish.onerror = () => {
+    window.clearTimeout(timeout);
+    reject(new Error("The Stockfish analysis engine could not be loaded."));
+  };
+  stockfish.onmessage = (event) => {
+    const line = String(event.data);
+    if (line === "uciok") {
+      stockfish.postMessage("setoption name Threads value 1");
+      stockfish.postMessage("setoption name Hash value 16");
+      stockfish.postMessage("isready");
+    } else if (line === "readyok") {
+      window.clearTimeout(timeout);
+      resolve();
+    }
+    const pending = state.enginePending;
+    if (!pending) return;
+    const score = line.match(/\bscore (cp|mate) (-?\d+)/);
+    if (score) {
+      pending.score = score[1] === "mate"
+        ? (Number(score[2]) > 0 ? 10000 : -10000)
+        : Number(score[2]);
+    }
+    if (line.startsWith("bestmove")) {
+      window.clearTimeout(pending.timeout);
+      state.enginePending = null;
+      if (pending.score === null) {
+        pending.reject(new Error("Stockfish did not return an evaluation."));
+      } else {
+        pending.resolve(pending.score);
+      }
+    }
+  };
+  stockfish.postMessage("uci");
+});
+
+let engineQueue = Promise.resolve();
+
+function stockfishScore(fen) {
+  const request = engineQueue.then(async () => {
+    await state.engineReady;
+    return new Promise((resolve, reject) => {
+      const pending = {
+        score: null,
+        resolve,
+        reject,
+        timeout: window.setTimeout(() => {
+          state.enginePending = null;
+          reject(new Error("Stockfish analysis timed out."));
+        }, 12000),
+      };
+      state.enginePending = pending;
+      stockfish.postMessage(`position fen ${fen}`);
+      stockfish.postMessage("go movetime 180");
+    });
+  });
+  engineQueue = request.catch(() => {});
+  return request;
+}
+
+async function analyzeLastMove(beforeFen, next, ply) {
+  const bestBefore = await stockfishScore(beforeFen);
+  const afterScore = await stockfishScore(next.fen);
+  const centipawnLoss = Math.max(0, Math.min(3000, Math.round(bestBefore + afterScore)));
+  const whiteEvaluation = Math.max(
+    -10000,
+    Math.min(10000, Math.round(next.turn === "w" ? afterScore : -afterScore)),
+  );
+  const analyzed = await api(roomApiPath("/analysis"), {
+    method: "POST",
+    body: JSON.stringify({
+      ply,
+      centipawnLoss,
+      evaluation: whiteEvaluation,
+    }),
+  });
+  await updateGame(analyzed);
+}
 
 function squareName(row, col) {
   return `${"abcdefgh"[col]}${8 - row}`;
@@ -185,12 +273,13 @@ function historyMove(move, index) {
 }
 
 function accuracy(moves) {
-  if (!moves.length) return 100;
-  const sum = moves.reduce(
+  const analyzedMoves = moves.filter((move) => Number.isFinite(move.centipawnLoss));
+  if (!analyzedMoves.length) return "—";
+  const sum = analyzedMoves.reduce(
     (total, move) => total + Math.exp(-Math.min(move.centipawnLoss || 0, 1000) / 300) * 100,
     0,
   );
-  return Math.round(sum / moves.length);
+  return Math.round(sum / analyzedMoves.length);
 }
 
 function renderHistory() {
@@ -216,8 +305,10 @@ function renderHistory() {
     list.scrollTop = list.scrollHeight;
   }
   document.querySelector("#move-total").textContent = `${moves.length} PLY${moves.length === 1 ? "" : "S"}`;
-  document.querySelector("#white-accuracy").textContent = `${accuracy(moves.filter((move) => move.color === "w"))}%`;
-  document.querySelector("#black-accuracy").textContent = `${accuracy(moves.filter((move) => move.color === "b"))}%`;
+  for (const [color, selector] of [["w", "#white-accuracy"], ["b", "#black-accuracy"]]) {
+    const value = accuracy(moves.filter((move) => move.color === color));
+    document.querySelector(selector).textContent = value === "—" ? value : `${value}%`;
+  }
 
   const last = moves.at(-1);
   document.querySelector("#last-move").textContent = last ? `${last.san}  ·  ${last.from} → ${last.to}` : "—";
@@ -232,11 +323,13 @@ function renderHistory() {
     chip.append(icon, label);
     if (animate) state.gradeAnimationPlayedPly = moves.length;
   } else {
-    chip.textContent = "—";
+    chip.textContent = last ? "ANALYZING" : "—";
   }
-  chip.className = `grade-chip ${last?.grade ? last.grade.toLowerCase().replaceAll(" ", "-") : "idle"}`;
+  chip.className = `grade-chip ${last?.grade ? last.grade.toLowerCase().replaceAll(" ", "-") : last ? "analyzing" : "idle"}`;
   const explanation = last
-    ? (last.centipawnLoss >= 10000 ? "A decisive chance was missed." : `${last.centipawnLoss} centipawn loss · local estimate`)
+    ? (last.centipawnLoss === undefined
+      ? "Stockfish is analyzing this move."
+      : `${last.centipawnLoss} centipawn loss · Stockfish 19 Lite`)
     : "Move details appear here.";
   document.querySelector("#last-explanation").textContent = explanation;
 }
@@ -281,6 +374,8 @@ function renderTurn() {
   document.querySelector("#white-rating").textContent = `${state.game.whiteRating} ELO`;
   document.querySelector("#black-rating").textContent = `${state.game.blackRating} ELO`;
   document.querySelector("#room-label").textContent = `ROOM ${state.game.roomCode}`;
+  document.querySelector("#time-control-label").textContent = state.game.timeControl;
+  renderClocks();
   document.querySelector("#turn-name").textContent =
     state.game.over ? "MATCH COMPLETE" : `${white ? "WHITE" : "BLACK"} TO MOVE`;
   document.querySelector("#turn-subtitle").textContent =
@@ -347,11 +442,14 @@ async function updateGame(next, animate = false) {
   const oldLastMove = state.game?.lastMove;
   const previousPly = state.game?.history.length || 0;
   state.game = next;
+  state.clockSyncAt = Date.now();
   if (animate && next.history.length > previousPly) {
     state.animatedPly = next.history.length;
   }
-  if (next.turn === "b") state.flipped = true;
-  else state.flipped = false;
+  if (!state.orientationInitialized) {
+    state.flipped = next.playerSide === "b";
+    state.orientationInitialized = true;
+  }
   render();
   if (animate && next.lastMove?.captured && next.lastMove !== oldLastMove) animateCapture();
 }
@@ -360,12 +458,16 @@ async function sendMove(from, to, promotion) {
   if (state.busy) return;
   state.busy = true;
   state.selected = null;
+  const beforeFen = state.game.fen;
   try {
     const next = await api(roomApiPath("/move"), {
       method: "POST",
       body: JSON.stringify({ from, to, ...(promotion ? { promotion } : {}) }),
     });
     await updateGame(next, true);
+    void analyzeLastMove(beforeFen, next, next.history.length).catch((error) => {
+      if (error.status !== 409) showToast(error.message);
+    });
     if (next.check && !next.over) showToast("Check! Protect your king.");
   } catch (error) {
     showToast(error.message);
@@ -486,10 +588,28 @@ async function forfeitGame() {
 }
 
 function updateClock() {
-  const seconds = Math.floor((Date.now() - state.startedAt) / 1000);
-  const minutes = String(Math.floor(seconds / 60)).padStart(2, "0");
+  renderClocks();
+}
+
+function formatClock(milliseconds) {
+  const seconds = Math.ceil(Math.max(0, milliseconds) / 1000);
+  const minutes = Math.floor(seconds / 60);
   const remainder = String(seconds % 60).padStart(2, "0");
-  document.querySelector("#game-clock").textContent = `${minutes}:${remainder}`;
+  return `${minutes}:${remainder}`;
+}
+
+function renderClocks() {
+  if (!state.game) return;
+  const elapsed = state.game.status === "active" && !state.game.over
+    ? Date.now() - state.clockSyncAt : 0;
+  for (const [color, side] of [["w", "white"], ["b", "black"]]) {
+    const isRunning = state.game.turn === color && state.game.status === "active";
+    const remaining = state.game[`${side}TimeMs`] - (isRunning ? elapsed : 0);
+    const clock = document.querySelector(`#${side}-clock`);
+    clock.textContent = formatClock(remaining);
+    clock.classList.toggle("active", isRunning && !state.game.over);
+    clock.classList.toggle("low", remaining <= 20000);
+  }
 }
 
 document.querySelector("#new-game").addEventListener("click", newGame);
@@ -556,11 +676,18 @@ window.setInterval(async () => {
   try {
     const next = await api(roomApiPath());
     if (next.history.length !== state.game.history.length ||
-        next.status !== state.game.status || next.result !== state.game.result) {
+        next.status !== state.game.status || next.result !== state.game.result ||
+        next.history.at(-1)?.grade !== state.game.history.at(-1)?.grade) {
       updateGame(next, next.history.length > state.game.history.length);
+    } else {
+      state.game.whiteTimeMs = next.whiteTimeMs;
+      state.game.blackTimeMs = next.blackTimeMs;
+      state.game.clockStartedAt = next.clockStartedAt;
+      state.clockSyncAt = Date.now();
+      renderClocks();
     }
   } catch (error) {
     showToast(error.message);
   }
-}, 1200);
-window.setInterval(updateClock, 1000);
+}, 1000);
+window.setInterval(updateClock, 100);

@@ -30,8 +30,22 @@ Usernames must be 3–20 letters, numbers, or underscores. Passwords must be at
 least 10 characters. Friend requests must be accepted before either player can
 send a friend invitation. New accounts start at 800 Elo. For games between two
 registered accounts, the server automatically updates both ratings after a
-win, loss, draw, or forfeit using the standard Elo expected-score formula
+win, loss, draw, flag, or forfeit using the standard Elo expected-score formula
 (K-factor 32). Guest games do not change account ratings.
+
+Games offer bullet, blitz, and rapid clocks with per-player time and Fischer
+increments. Each player's clock is enforced by the server; a player who runs
+out of time loses. Boards stay oriented from each player's perspective instead
+of flipping every turn.
+
+Move grades and position evaluations use the Stockfish 19 Lite single-threaded
+WebAssembly engine in the browser. The engine assets are served from `public/`,
+so they do not require runtime downloads or a Stockfish process on the Wasmer
+server. First-use engine loading may take a moment, and analysis uses the
+player's device. Stockfish.js is GPL-3.0; its license and authors are in
+`public/engine/Copying.txt` and `public/engine/AUTHORS.txt`. The corresponding
+source is available at
+[Stockfish.js v19.0.1](https://github.com/nmrugg/stockfish.js/tree/v19.0.1).
 
 ## Host on the internet
 

@@ -36,13 +36,30 @@
     <section class="play-panel">
       <div class="section-title"><div><span class="eyebrow">QUICK PLAY</span><h2>Start a game</h2></div></div>
       <div class="quick-play">
+        <label class="time-control-picker">Time control
+          <select id="time-control">
+            <optgroup label="Bullet">
+              <option value="bullet_1_0">1+0 · 1 minute</option>
+              <option value="bullet_2_1">2+1 · 2 minutes + 1 second</option>
+            </optgroup>
+            <optgroup label="Blitz">
+              <option value="blitz_3_0">3+0 · 3 minutes</option>
+              <option value="blitz_3_2">3+2 · 3 minutes + 2 seconds</option>
+              <option value="blitz_5_0">5+0 · 5 minutes</option>
+            </optgroup>
+            <optgroup label="Rapid">
+              <option value="rapid_10_0" selected>10+0 · 10 minutes</option>
+              <option value="rapid_15_10">15+10 · 15 minutes + 10 seconds</option>
+            </optgroup>
+          </select>
+        </label>
         <button id="create-room" class="button primary" type="button">Create a room</button>
         <form id="join-form" class="join-form">
           <label for="room-code">Have a room code?</label>
           <div class="join-row"><input id="room-code" maxlength="8" autocomplete="off" placeholder="ABCD1234" required><button class="button" type="submit">Join</button></div>
         </form>
       </div>
-      <p class="hint">No account is needed to play in a room. Share the room link with your opponent.</p>
+      <p class="hint">Choose a clock for both players. No account is needed to play in a room.</p>
     </section>
 
     <section id="friends-panel" class="friends-panel hidden">
@@ -64,10 +81,10 @@
         <textarea id="invite-url" rows="2" readonly aria-describedby="invite-help"></textarea>
         <button id="copy-invite" class="button" type="button">Copy link</button>
       </div>
-      <p id="invite-help" class="hint">Share this link with your opponent. It stays in this box instead of overflowing the page.</p>
+      <p id="invite-help" class="hint">Share this link with your opponent. The link wraps to fit smaller screens.</p>
     </section>
     <p id="message" class="message" role="status" aria-live="polite"></p>
-    <footer>Move grades are estimates, not engine analysis.</footer>
+    <footer>Game reviews powered by Stockfish 19 Lite.</footer>
   </main>
 </body>
 </html>

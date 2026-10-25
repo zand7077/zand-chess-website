@@ -70,7 +70,10 @@ async function loadDashboard() {
         try {
           const invite = await api("/api/invitations", {
             method: "POST",
-            body: JSON.stringify({ friendId: friend.id }),
+            body: JSON.stringify({
+              friendId: friend.id,
+              timeControl: document.querySelector("#time-control").value,
+            }),
           });
           tell(`Invitation sent to ${friend.username}.`);
           await copyInvite(invite.roomCode);
@@ -200,7 +203,10 @@ document.querySelector("#logout-button").addEventListener("click", async () => {
 
 document.querySelector("#create-room").addEventListener("click", async () => {
   try {
-    const room = await api("/api/rooms", { method: "POST", body: "{}" });
+    const room = await api("/api/rooms", {
+      method: "POST",
+      body: JSON.stringify({ timeControl: document.querySelector("#time-control").value }),
+    });
     await copyInvite(room.roomCode);
     window.location.href = room.url;
   } catch (error) { tell(error.message); }

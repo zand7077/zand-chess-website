@@ -12,9 +12,9 @@
     <header class="topbar">
       <a class="brand" href="/" aria-label="Chess home">
         <span class="brand-mark">♜</span>
-        <span class="brand-copy"><b>CHESS</b><small><a href="/">FRIENDS & ROOMS</a></small></span>
+        <span class="brand-copy"><b>CHESS</b><small>FRIENDS & ROOMS</small></span>
       </a>
-      <div class="top-center"><span id="room-label">ONLINE MATCH</span><i></i><span id="game-clock">00:00</span></div>
+      <div class="top-center"><span id="room-label">ONLINE MATCH</span><i></i><span id="time-control-label">10+0</span></div>
     </header>
 
     <section class="arena">
@@ -23,6 +23,7 @@
           <div class="player-avatar avatar-dark">♚</div>
           <div class="player-meta"><strong id="black-name">BLACK</strong><small>PLAYER 2</small></div>
           <span class="rating-pill" id="black-rating">800 ELO</span>
+          <span class="player-clock" id="black-clock">10:00</span>
           <div class="captured-list" id="captured-black" aria-label="Black captured pieces"></div>
           <span class="material" id="black-material"></span>
         </div>
@@ -34,10 +35,11 @@
           <div class="player-avatar avatar-light">♔</div>
           <div class="player-meta"><strong id="white-name">WHITE</strong><small>PLAYER 1</small></div>
           <span class="rating-pill" id="white-rating">800 ELO</span>
+          <span class="player-clock" id="white-clock">10:00</span>
           <div class="captured-list" id="captured-white" aria-label="White captured pieces"></div>
           <span class="material" id="white-material"></span>
         </div>
-        <div class="board-caption"><span>STANDARD CHESS</span><span>ROTATES EACH TURN</span></div>
+        <div class="board-caption"><span>STANDARD CHESS</span><span>YOUR PIECES AT BOTTOM</span></div>
       </section>
 
       <aside class="control-deck">
@@ -50,7 +52,7 @@
         <section class="evaluation panel">
           <div class="section-heading"><div><span class="eyebrow">POSITION</span><h2>Evaluation</h2></div><strong id="eval-score">+0.0</strong></div>
           <div class="eval-track"><div id="eval-white" class="eval-white"></div><div id="eval-marker" class="eval-marker"></div></div>
-          <div class="eval-legend" title="Estimated from a lightweight material evaluation; not engine analysis."><span>WHITE WIN <b id="white-win-chance">50%</b></span><span>BLACK WIN <b id="black-win-chance">50%</b></span></div>
+          <div class="eval-legend" title="Position estimates from Stockfish 19 Lite; win percentages are approximate."><span>WHITE WIN <b id="white-win-chance">50%</b></span><span>BLACK WIN <b id="black-win-chance">50%</b></span></div>
           <div class="accuracy-row"><span>WHITE ACCURACY</span><strong id="white-accuracy">100%</strong><span>BLACK ACCURACY</span><strong id="black-accuracy">100%</strong></div>
         </section>
 
@@ -71,7 +73,7 @@
           <button class="action-button secondary" id="share-room" title="Copy invite link">INVITE</button>
           <button class="action-button secondary" id="flip-board" title="Flip board">⇅</button>
         </div>
-        <footer>Move grades are estimates, not engine analysis.</footer>
+        <footer>Move analysis powered by Stockfish 19 Lite.</footer>
       </aside>
     </section>
   </main>

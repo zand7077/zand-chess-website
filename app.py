@@ -6,6 +6,7 @@ import os
 import re
 import secrets
 import sqlite3
+import time
 from pathlib import Path
 from typing import Any
 
@@ -19,7 +20,15 @@ bp = Blueprint("chess", __name__)
 ROOM_CODE = re.compile(r"^[A-Z2-9]{8}$")
 USERNAME = re.compile(r"^[A-Za-z0-9_]{3,20}$")
 PIECE_VALUES = {"p": 1.0, "n": 3.2, "b": 3.3, "r": 5.0, "q": 9.0}
-MATE_SCORE = 10000
+TIME_CONTROLS = {
+    "bullet_1_0": {"label": "Bullet · 1+0", "seconds": 60, "increment": 0},
+    "bullet_2_1": {"label": "Bullet · 2+1", "seconds": 120, "increment": 1},
+    "blitz_3_0": {"label": "Blitz · 3+0", "seconds": 180, "increment": 0},
+    "blitz_3_2": {"label": "Blitz · 3+2", "seconds": 180, "increment": 2},
+    "blitz_5_0": {"label": "Blitz · 5+0", "seconds": 300, "increment": 0},
+    "rapid_10_0": {"label": "Rapid · 10+0", "seconds": 600, "increment": 0},
+    "rapid_15_10": {"label": "Rapid · 15+10", "seconds": 900, "increment": 10},
+}
 
 
 class DatabaseIntegrityError(Exception):
@@ -248,6 +257,11 @@ def initialize_database(backend: str, config: dict[str, Any]) -> None:
                     moves_json TEXT NOT NULL DEFAULT '[]',
                     grades_json TEXT NOT NULL DEFAULT '[]',
                     rating_changes_json TEXT,
+                    time_control TEXT NOT NULL DEFAULT 'rapid_10_0',
+                    white_time_ms INTEGER NOT NULL DEFAULT 600000,
+                    black_time_ms INTEGER NOT NULL DEFAULT 600000,
+                    increment_seconds INTEGER NOT NULL DEFAULT 0,
+                    clock_started_at INTEGER,
                     result TEXT,
                     status TEXT NOT NULL CHECK(status IN ('waiting', 'active', 'completed')),
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -268,6 +282,18 @@ def initialize_database(backend: str, config: dict[str, Any]) -> None:
                 connection.execute(
                     "ALTER TABLE games ADD COLUMN rating_changes_json TEXT"
                 )
+            column_types = {
+                "time_control": "TEXT NOT NULL DEFAULT 'rapid_10_0'",
+                "white_time_ms": "INTEGER NOT NULL DEFAULT 600000",
+                "black_time_ms": "INTEGER NOT NULL DEFAULT 600000",
+                "increment_seconds": "INTEGER NOT NULL DEFAULT 0",
+                "clock_started_at": "INTEGER",
+            }
+            for name, definition in column_types.items():
+                if name not in game_columns:
+                    connection.execute(
+                        f"ALTER TABLE games ADD COLUMN {name} {definition}"
+                    )
         finally:
             connection.close()
         return
@@ -315,6 +341,11 @@ def initialize_database(backend: str, config: dict[str, Any]) -> None:
                 moves_json TEXT NOT NULL DEFAULT '[]',
                 grades_json TEXT NOT NULL DEFAULT '[]',
                 rating_changes_json TEXT,
+                time_control VARCHAR(24) NOT NULL DEFAULT 'rapid_10_0',
+                white_time_ms BIGINT NOT NULL DEFAULT 600000,
+                black_time_ms BIGINT NOT NULL DEFAULT 600000,
+                increment_seconds INTEGER NOT NULL DEFAULT 0,
+                clock_started_at BIGINT,
                 result VARCHAR(255),
                 status VARCHAR(16) NOT NULL CHECK(status IN ('waiting', 'active', 'completed')),
                 created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -376,6 +407,11 @@ def initialize_database(backend: str, config: dict[str, Any]) -> None:
             moves_json TEXT NOT NULL,
             grades_json TEXT NOT NULL,
             rating_changes_json TEXT,
+            time_control VARCHAR(24) NOT NULL DEFAULT 'rapid_10_0',
+            white_time_ms BIGINT NOT NULL DEFAULT 600000,
+            black_time_ms BIGINT NOT NULL DEFAULT 600000,
+            increment_seconds INTEGER NOT NULL DEFAULT 0,
+            clock_started_at BIGINT,
             result VARCHAR(255),
             status VARCHAR(16) NOT NULL,
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -388,6 +424,27 @@ def initialize_database(backend: str, config: dict[str, Any]) -> None:
     try:
         for statement in schema:
             connection.execute(statement)
+        if backend == "postgres":
+            columns = {
+                row["column_name"] for row in connection.execute(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_schema = current_schema() AND table_name = 'games'"
+                ).fetchall()
+            }
+        else:
+            columns = {
+                row["Field"] for row in connection.execute("SHOW COLUMNS FROM games").fetchall()
+            }
+        column_types = {
+            "time_control": "VARCHAR(24) NOT NULL DEFAULT 'rapid_10_0'",
+            "white_time_ms": "BIGINT NOT NULL DEFAULT 600000",
+            "black_time_ms": "BIGINT NOT NULL DEFAULT 600000",
+            "increment_seconds": "INTEGER NOT NULL DEFAULT 0",
+            "clock_started_at": "BIGINT",
+        }
+        for name, definition in column_types.items():
+            if name not in columns:
+                connection.execute(f"ALTER TABLE games ADD COLUMN {name} {definition}")
         connection.commit()
     finally:
         connection.close()
@@ -659,8 +716,19 @@ def room_user_is_friend(user_id: int, friend_id: int) -> bool:
     ).fetchone() is not None
 
 
+def requested_time_control() -> tuple[str, dict[str, int | str]] | None:
+    value = json_body().get("timeControl", "rapid_10_0")
+    if not isinstance(value, str) or value not in TIME_CONTROLS:
+        return None
+    return value, TIME_CONTROLS[value]
+
+
 @bp.post("/api/rooms")
 def create_room():
+    selected_time_control = requested_time_control()
+    if selected_time_control is None:
+        return error("Choose a supported time control.")
+    time_control, settings = selected_time_control
     user = current_user()
     visitor_id = guest_id() if user is None else None
     code = new_room_code()
@@ -668,11 +736,16 @@ def create_room():
         """
         INSERT INTO games(
             room_code, white_user_id, white_guest_id,
-            moves_json, grades_json, status
+            moves_json, grades_json, status, time_control,
+            white_time_ms, black_time_ms, increment_seconds
         )
-        VALUES (?, ?, ?, '[]', '[]', 'waiting')
+        VALUES (?, ?, ?, '[]', '[]', ?, ?, ?, ?, ?)
         """,
-        (code, user["id"] if user else None, visitor_id),
+        (
+            code, user["id"] if user else None, visitor_id, "waiting",
+            time_control, int(settings["seconds"]) * 1000,
+            int(settings["seconds"]) * 1000, int(settings["increment"]),
+        ),
     )
     database().commit()
     return jsonify(roomCode=code, url=f"/play?room={code}"), 201
@@ -683,6 +756,10 @@ def invite_friend():
     user = require_user()
     if user is None:
         return error("Sign in to invite a friend.", 401)
+    selected_time_control = requested_time_control()
+    if selected_time_control is None:
+        return error("Choose a supported time control.")
+    time_control, settings = selected_time_control
     friend_id = json_body().get("friendId")
     if not isinstance(friend_id, int) or not room_user_is_friend(user["id"], friend_id):
         return error("Choose someone from your friends list.")
@@ -691,11 +768,16 @@ def invite_friend():
         """
         INSERT INTO games(
             room_code, white_user_id, invited_user_id,
-            moves_json, grades_json, status
+            moves_json, grades_json, status, time_control,
+            white_time_ms, black_time_ms, increment_seconds
         )
-        VALUES (?, ?, ?, '[]', '[]', 'waiting')
+        VALUES (?, ?, ?, '[]', '[]', ?, ?, ?, ?, ?)
         """,
-        (code, user["id"], friend_id),
+        (
+            code, user["id"], friend_id, "waiting", time_control,
+            int(settings["seconds"]) * 1000, int(settings["seconds"]) * 1000,
+            int(settings["increment"]),
+        ),
     )
     database().commit()
     return jsonify(roomCode=code), 201
@@ -717,6 +799,47 @@ def load_room(code: str, for_update: bool = False) -> sqlite3.Row | None:
     elif for_update and current_app.config["DATABASE_BACKEND"] == "mysql":
         statement += " FOR UPDATE"
     return database().execute(statement, (code,)).fetchone()
+
+
+def remaining_clocks(room: sqlite3.Row, now_ms: int | None = None) -> tuple[int, int]:
+    white_ms = int(room["white_time_ms"])
+    black_ms = int(room["black_time_ms"])
+    if room["status"] != "active" or room["clock_started_at"] is None:
+        return white_ms, black_ms
+    board, _history = room_board(room)
+    elapsed = max(0, (now_ms or int(time.time() * 1000)) - room["clock_started_at"])
+    if board.turn == chess.WHITE:
+        white_ms = max(0, white_ms - elapsed)
+    else:
+        black_ms = max(0, black_ms - elapsed)
+    return white_ms, black_ms
+
+
+def finish_on_time(code: str) -> sqlite3.Row | None:
+    connection = database()
+    connection.execute("BEGIN IMMEDIATE")
+    room = load_room(code, for_update=True)
+    if room is None or room["status"] != "active":
+        connection.commit()
+        return room
+    now_ms = int(time.time() * 1000)
+    white_ms, black_ms = remaining_clocks(room, now_ms)
+    board, _history = room_board(room)
+    expired_side = "w" if board.turn == chess.WHITE else "b"
+    if (white_ms if expired_side == "w" else black_ms) > 0:
+        connection.commit()
+        return room
+    result = "Black wins on time" if expired_side == "w" else "White wins on time"
+    connection.execute(
+        """
+        UPDATE games SET status = 'completed', result = ?, white_time_ms = ?,
+            black_time_ms = ?, clock_started_at = NULL WHERE id = ?
+        """,
+        (result, white_ms, black_ms, room["id"]),
+    )
+    rate_completed_game(connection, room, result)
+    connection.commit()
+    return load_room(code)
 
 
 def room_side(room: sqlite3.Row, user: sqlite3.Row | None, visitor_id: str) -> str | None:
@@ -776,86 +899,6 @@ def position_score(board: chess.Board, perspective: chess.Color) -> float:
     if board.is_check():
         score += -0.08 if board.turn == perspective else 0.08
     return score
-
-
-def terminal_score(board: chess.Board, perspective: chess.Color) -> float | None:
-    outcome = board.outcome(claim_draw=True)
-    if outcome is None:
-        return None
-    if outcome.winner is None:
-        return 0.0
-    return MATE_SCORE if outcome.winner == perspective else -MATE_SCORE
-
-
-def grade_move(board: chess.Board, move: chess.Move) -> dict[str, Any]:
-    mover = board.turn
-    initial_score = position_score(board, mover)
-    candidates = list(board.legal_moves)
-    scores = []
-    for candidate in candidates:
-        child = board.copy(stack=True)
-        is_capture = child.is_capture(candidate)
-        child.push(candidate)
-        terminal = terminal_score(child, mover)
-        if terminal is not None:
-            score = terminal
-        else:
-            replies = list(child.legal_moves)
-            reply_scores = []
-            for reply in replies:
-                grandchild = child.copy(stack=True)
-                grandchild.push(reply)
-                reply_scores.append(
-                    terminal_score(grandchild, mover)
-                    if terminal_score(grandchild, mover) is not None
-                    else position_score(grandchild, mover)
-                )
-            score = min(reply_scores) if reply_scores else position_score(child, mover)
-
-        winning_recapture = False
-        moving_piece = board.piece_at(candidate.from_square)
-        if (not is_capture and moving_piece is not None
-                and moving_piece.piece_type != chess.PAWN and child.is_check()):
-            for reply in child.legal_moves:
-                if reply.to_square != candidate.to_square or not child.is_capture(reply):
-                    continue
-                after_capture = child.copy(stack=True)
-                after_capture.push(reply)
-                for recapture in after_capture.legal_moves:
-                    if recapture.to_square != candidate.to_square or not after_capture.is_capture(recapture):
-                        continue
-                    final = after_capture.copy(stack=True)
-                    final.push(recapture)
-                    final_score = terminal_score(final, mover)
-                    if (final_score if final_score is not None else position_score(final, mover)) >= initial_score + 1:
-                        winning_recapture = True
-                        break
-        scores.append((candidate, score, winning_recapture))
-
-    best = max(score for _candidate, score, _winning in scores)
-    _chosen, chosen_score, winning_recapture = next(
-        value for value in scores if value[0] == move
-    )
-    loss = max(0, round((best - chosen_score) * 100))
-    if loss >= 500:
-        grade = "Grave error"
-    elif winning_recapture and loss <= 10:
-        grade = "Brilliant"
-    elif loss <= 10:
-        grade = "Best"
-    elif loss <= 15:
-        grade = "Great"
-    elif loss <= 30:
-        grade = "Excellent"
-    elif loss <= 75:
-        grade = "Good"
-    elif loss <= 150:
-        grade = "Inaccuracy"
-    elif loss <= 300:
-        grade = "Mistake"
-    else:
-        grade = "Blunder"
-    return {"grade": grade, "centipawnLoss": loss}
 
 
 def result_for(board: chess.Board) -> str | None:
@@ -927,6 +970,9 @@ def rate_completed_game(
 
 def room_snapshot(room: sqlite3.Row, side: str) -> dict[str, Any]:
     board, history = room_board(room)
+    grades = json.loads(room["grades_json"])
+    white_time_ms, black_time_ms = remaining_clocks(room)
+    last_analysis = grades[-1] if grades else {}
     result = room["result"] or result_for(board)
     over = room["status"] == "completed" or result is not None
     if room["status"] == "active" and result:
@@ -957,6 +1003,12 @@ def room_snapshot(room: sqlite3.Row, side: str) -> dict[str, Any]:
         "over": over,
         "result": room["result"] or result,
         "status": room["status"],
+        "timeControl": TIME_CONTROLS.get(
+            room["time_control"], TIME_CONTROLS["rapid_10_0"]
+        )["label"],
+        "whiteTimeMs": white_time_ms,
+        "blackTimeMs": black_time_ms,
+        "clockStartedAt": room["clock_started_at"],
         "roomCode": room["room_code"],
         "playerSide": side,
         "whiteName": room["white_name"] or "Guest",
@@ -979,7 +1031,12 @@ def room_snapshot(room: sqlite3.Row, side: str) -> dict[str, Any]:
         ],
         "history": history,
         "lastMove": last_move,
-        "evaluation": round(position_score(board, chess.WHITE), 1),
+        "evaluation": (
+            last_analysis.get(
+                "evaluation", round(position_score(board, chess.WHITE) * 100)
+            )
+            / 100
+        ),
     }
 
 
@@ -1020,10 +1077,11 @@ def join_room(code: str):
         return error("This room is no longer waiting for a player.", 409)
     connection.execute(
         """
-        UPDATE games SET black_user_id = ?, black_guest_id = ?, status = 'active'
+        UPDATE games SET black_user_id = ?, black_guest_id = ?, status = 'active',
+            clock_started_at = ?
         WHERE id = ? AND status = 'waiting'
         """,
-        (user["id"] if user else None, visitor, fresh["id"]),
+        (user["id"] if user else None, visitor, int(time.time() * 1000), fresh["id"]),
     )
     connection.commit()
     room = load_room(code.upper())
@@ -1035,6 +1093,8 @@ def get_room_state(code: str):
     room = load_room(code.upper())
     if room is None:
         return error("That room could not be found.", 404)
+    if room["status"] == "active":
+        room = finish_on_time(code.upper())
     user = current_user()
     if (
         room["status"] == "waiting"
@@ -1088,23 +1148,45 @@ def make_move(code: str):
     if move not in board.legal_moves:
         connection.rollback()
         return error("That move is not legal.")
-    grade = grade_move(board, move)
+    now_ms = int(time.time() * 1000)
+    white_ms, black_ms = remaining_clocks(room, now_ms)
+    remaining_ms = white_ms if board.turn == chess.WHITE else black_ms
+    if remaining_ms <= 0:
+        result = "Black wins on time" if board.turn == chess.WHITE else "White wins on time"
+        connection.execute(
+            """
+            UPDATE games SET status = 'completed', result = ?, white_time_ms = ?,
+                black_time_ms = ?, clock_started_at = NULL WHERE id = ?
+            """,
+            (result, white_ms, black_ms, room["id"]),
+        )
+        rate_completed_game(connection, room, result)
+        connection.commit()
+        return jsonify(room_snapshot(load_room(code.upper()), side))
     moves = json.loads(room["moves_json"])
     grades = json.loads(room["grades_json"])
     moves.append(uci)
-    grades.append(grade)
+    grades.append({})
     board.push(move)
     result = result_for(board)
+    if board.turn == chess.BLACK:
+        white_ms += room["increment_seconds"] * 1000
+    else:
+        black_ms += room["increment_seconds"] * 1000
     connection.execute(
         """
         UPDATE games SET moves_json = ?, grades_json = ?, result = ?,
-            status = ? WHERE id = ?
+            status = ?, white_time_ms = ?, black_time_ms = ?,
+            clock_started_at = ? WHERE id = ?
         """,
         (
             json.dumps(moves),
             json.dumps(grades),
             result,
             "completed" if result else "active",
+            white_ms,
+            black_ms,
+            None if result else int(time.time() * 1000),
             room["id"],
         ),
     )
@@ -1113,6 +1195,73 @@ def make_move(code: str):
     connection.commit()
     room = load_room(code.upper())
     return jsonify(room_snapshot(room, side))
+
+
+@bp.post("/api/rooms/<code>/analysis")
+def submit_move_analysis(code: str):
+    room, side, failure = authorized_room(code)
+    if failure:
+        return failure
+    body = json_body()
+    ply = body.get("ply")
+    centipawn_loss = body.get("centipawnLoss")
+    evaluation = body.get("evaluation")
+    if (
+        not isinstance(ply, int)
+        or isinstance(ply, bool)
+        or not isinstance(centipawn_loss, int)
+        or isinstance(centipawn_loss, bool)
+        or not isinstance(evaluation, int)
+        or isinstance(evaluation, bool)
+        or not 1 <= ply <= 1000
+        or not 0 <= centipawn_loss <= 3000
+        or not -10000 <= evaluation <= 10000
+    ):
+        return error("The engine analysis values are invalid.")
+    connection = database()
+    connection.execute("BEGIN IMMEDIATE")
+    fresh = load_room(code.upper(), for_update=True)
+    fresh_side = room_side(fresh, current_user(), guest_id())
+    if fresh_side is None:
+        connection.rollback()
+        return error("You are not a player in this room.", 403)
+    moves = json.loads(fresh["moves_json"])
+    grades = json.loads(fresh["grades_json"])
+    if ply > len(moves) or ply > len(grades):
+        connection.rollback()
+        return error("That move does not exist in this game.", 409)
+    if not isinstance(grades[ply - 1], dict):
+        grades[ply - 1] = {}
+    if "grade" in grades[ply - 1]:
+        connection.commit()
+        return jsonify(room_snapshot(fresh, fresh_side))
+    if centipawn_loss >= 500:
+        grade = "Grave error"
+    elif centipawn_loss >= 300:
+        grade = "Blunder"
+    elif centipawn_loss >= 150:
+        grade = "Mistake"
+    elif centipawn_loss >= 75:
+        grade = "Inaccuracy"
+    elif centipawn_loss >= 30:
+        grade = "Good"
+    elif centipawn_loss >= 15:
+        grade = "Excellent"
+    elif centipawn_loss > 10:
+        grade = "Great"
+    else:
+        grade = "Best"
+    grades[ply - 1] = {
+        "grade": grade,
+        "centipawnLoss": centipawn_loss,
+        "evaluation": evaluation,
+    }
+    connection.execute(
+        "UPDATE games SET grades_json = ? WHERE id = ?",
+        (json.dumps(grades), fresh["id"]),
+    )
+    connection.commit()
+    return jsonify(room_snapshot(load_room(code.upper()), fresh_side))
 
 
 @bp.post("/api/rooms/<code>/forfeit")
@@ -1131,9 +1280,14 @@ def forfeit(code: str):
         connection.rollback()
         return error("Only an active game can be forfeited.", 409)
     result = "Black wins by forfeit" if side == "w" else "White wins by forfeit"
+    white_ms, black_ms = remaining_clocks(room)
     connection.execute(
-        "UPDATE games SET status = 'completed', result = ? WHERE id = ? AND status = 'active'",
-        (result, room["id"]),
+        """
+        UPDATE games SET status = 'completed', result = ?, white_time_ms = ?,
+            black_time_ms = ?, clock_started_at = NULL
+        WHERE id = ? AND status = 'active'
+        """,
+        (result, white_ms, black_ms, room["id"]),
     )
     rate_completed_game(connection, room, result)
     connection.commit()
@@ -1155,14 +1309,19 @@ def restart_game(code: str):
     if room["status"] != "completed":
         connection.rollback()
         return error("A new game can start after this match ends.", 409)
+    clock = TIME_CONTROLS.get(room["time_control"], TIME_CONTROLS["rapid_10_0"])
+    starting_ms = int(clock["seconds"]) * 1000
     connection.execute(
         """
         UPDATE games SET moves_json = '[]', grades_json = '[]', rating_changes_json = NULL, result = NULL,
             status = CASE WHEN black_user_id IS NOT NULL OR black_guest_id IS NOT NULL
-                          THEN 'active' ELSE 'waiting' END
+                          THEN 'active' ELSE 'waiting' END,
+            white_time_ms = ?, black_time_ms = ?,
+            clock_started_at = CASE WHEN black_user_id IS NOT NULL OR black_guest_id IS NOT NULL
+                                    THEN ? ELSE NULL END
         WHERE id = ?
         """,
-        (room["id"],),
+        (starting_ms, starting_ms, int(time.time() * 1000), room["id"]),
     )
     connection.commit()
     return jsonify(room_snapshot(load_room(code.upper()), side))

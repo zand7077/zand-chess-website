@@ -25,7 +25,8 @@ button { color: inherit; }
 .brand-copy { display: grid; gap: 2px; letter-spacing: .14em; }
 .brand-copy b { font-size: 12px; }
 .brand-copy small, .eyebrow { color: var(--muted); font-size: 9px; font-weight: 800; letter-spacing: .16em; }
-.top-center { display: flex; align-items: center; gap: 10px; color: #676862; font: 10px "DM Mono", monospace; letter-spacing: .09em; }
+.top-center { display: flex; align-items: center; gap: 10px; min-width: 0; color: #676862; font: 10px "DM Mono", monospace; letter-spacing: .09em; white-space: nowrap; }
+.top-center span:first-child { overflow: hidden; text-overflow: ellipsis; }
 .top-center i { width: 1px; height: 14px; background: #cbc7bd; }
 .live-dot, .turn-signal i { width: 7px; height: 7px; border-radius: 50%; background: var(--cyan); }
 .arena { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 32px; padding: 28px 0 35px; align-items: center; }
@@ -38,6 +39,9 @@ button { color: inherit; }
 .player-meta strong { font-size: 10px; letter-spacing: .12em; }
 .player-meta small { color: var(--muted); font-size: 8px; letter-spacing: .12em; }
 .rating-pill { color: #666760; border: 1px solid var(--panel-edge); border-radius: 4px; padding: 5px 8px; font: 9px "DM Mono", monospace; white-space: nowrap; }
+.player-clock { min-width: 64px; padding: 6px 8px; border: 1px solid var(--panel-edge); border-radius: 4px; color: #34363a; background: #e8e4dc; font: 700 14px "DM Mono",monospace; text-align: center; white-space: nowrap; }
+.player-clock.active { border-color: #9a713d; color: #fffaf1; background: #504534; box-shadow: 0 0 0 2px #9a713d33; }
+.player-clock.low { color: #fffaf1; border-color: #a6503d; background: #a6503d; }
 .captured-list { display: flex; align-items: center; flex: 1; min-width: 0; overflow: hidden; color: #74756f; font: 15px "Segoe UI Symbol", sans-serif; letter-spacing: -5px; padding-left: 6px; }
 .material { min-width: 20px; color: var(--gold); font: 10px "DM Mono", monospace; }
 .board-frame { position: relative; width: 100%; aspect-ratio: 1; margin: 5px 0; padding: 7px; border: 1px solid #34363a; border-radius: 4px; background: #34363a; }
@@ -97,6 +101,7 @@ h1,h2,p { margin: 0; }
 .grade-icon { display: inline-block; margin-right: 5px; font-size: 13px; line-height: 1; }
 .grade-icon-pop { animation: gradeIconPop .62s cubic-bezier(.16,.9,.25,1.35) both; }
 .grade-chip.idle { color: var(--muted); border-color: var(--panel-edge); background: #eeebe4; }
+.grade-chip.analyzing { color: var(--muted); border-color: var(--panel-edge); background: #eeebe4; font-size: 7px; }
 .grade-chip.blunder,.grade-chip.missed-win { color: #913b36; border-color: #dfb8b0; background: #f3dfd8; }
 .grade-chip.grave-error { color: #fff8ef; border-color: #752c2a; background: #752c2a; }
 .grade-chip.mistake { color: #9e5335; }
@@ -119,7 +124,7 @@ h1,h2,p { margin: 0; }
 .history-grade.brilliant-grade { font-weight: 800; letter-spacing: .04em; }
 .empty-history { display: grid; place-content: center; min-height: 65px; text-align: center; color: #77766f; font-size: 9px; line-height: 1.6; }
 .empty-history span { color: var(--violet); font-size: 17px; }
-.action-row { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0,1fr) minmax(66px,.65fr) 60px 46px; gap: 8px; }
+.action-row { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0,1fr) minmax(58px,.65fr) minmax(58px,.6fr) 46px; gap: 8px; min-width: 0; }
 .action-button { border: 0; border-radius: 4px; cursor: pointer; font: 800 9px "DM Mono",monospace; letter-spacing: .1em; transition: filter .14s; }
 .action-button:hover { filter: brightness(.95); }
 .action-button:active { transform: translateY(0) scale(.98); }
@@ -129,6 +134,7 @@ h1,h2,p { margin: 0; }
 .forfeit-button { border: 1px solid #d9b9b0; color: #913b36; background: #f3e5df; font-size: 8px; }
 .forfeit-button:disabled { cursor: not-allowed; opacity: .55; }
 .secondary { border: 1px solid var(--panel-edge); color: var(--text); background: var(--panel); font-size: 19px; }
+.action-row .secondary { min-width: 0; padding: 0 5px; font-size: 8px; letter-spacing: .04em; white-space: nowrap; }
 .control-deck footer { color: #77766f; text-align: center; font: 7px "DM Mono",monospace; letter-spacing: .06em; }
 .control-deck footer b { color: #4e5155; }.control-deck footer span { padding: 0 4px; color: var(--cyan); }
 .toast { position: fixed; z-index: 8; left: 50%; bottom: 28px; width: min(520px,calc(100% - 28px)); padding: 10px 16px; border: 1px solid #45474b; border-radius: 4px; color: #f5f2eb; background: #303237; box-shadow: 0 8px 22px #26231f30; font-size: 12px; text-align: center; overflow-wrap: anywhere; opacity: 0; transform: translate(-50%,12px); transition: .2s; pointer-events: none; }
@@ -171,7 +177,12 @@ h1,h2,p { margin: 0; }
 @media (max-width: 680px) {
   .app-shell { width: min(520px,100% - 22px); }
   .topbar { height: 64px; }
-  .top-center { font-size: 8px; }
+  .top-center { gap: 6px; font-size: 8px; }
+  .top-center span:first-child { max-width: 92px; }
+  .brand { gap: 6px; }
+  .brand-mark { width: 34px; height: 34px; font-size: 20px; }
+  .brand-copy b { font-size: 10px; }
+  .brand-copy small { font-size: 7px; white-space: nowrap; }
   .arena { grid-template-columns: 1fr; gap: 15px; padding-top: 12px; }
   .board-column { width: min(100%, calc(100vw - 24px)); }
   .board-frame { padding: 5px; }
@@ -182,13 +193,18 @@ h1,h2,p { margin: 0; }
   .history { min-height: 120px; }
   .move-list { max-height: 130px; }
   .control-deck footer { grid-column: 1 / -1; padding-bottom: 4px; }
-  .player-strip { gap: 8px; min-height: 47px; }
-  .player-avatar { width: 32px; height: 32px; font-size: 23px; }
-  .player-meta { min-width: 79px; }
+  .player-strip { gap: 6px; min-height: 47px; }
+  .player-avatar { width: 30px; height: 30px; font-size: 22px; }
+  .player-meta { min-width: 0; flex: 1; }
+  .player-meta strong { max-width: 100px; overflow: hidden; text-overflow: ellipsis; }
+  .player-clock { min-width: 54px; padding: 5px 4px; font-size: 12px; }
+  .rating-pill { padding: 4px 5px; font-size: 8px; }
 }
 @media (max-width: 400px) {
   .app-shell { width: calc(100% - 14px); }
   .arena { padding-top: 7px; }
+  .control-deck { grid-template-columns: minmax(0,1fr); }
+  .turn-card,.evaluation,.latest-move,.history { grid-column: 1; }
   .player-meta { min-width: 70px; }
   .player-meta small { font-size: 7px; }
   .rating-pill { padding: 4px 6px; font-size: 8px; }
