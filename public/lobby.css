@@ -98,6 +98,16 @@ input:focus, select:focus { outline: 2px solid #a6503d66; border-color: var(--ac
 .invite-time-option:has(input:checked) { border-color: var(--accent); background: #a6503d12; box-shadow: 0 0 0 1px #a6503d33; }
 .invite-time-option input { width: 16px; height: 16px; flex: 0 0 auto; margin: 0; accent-color: var(--accent); }
 .invite-time-actions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 18px; }
+.join-prompt-modal { position: fixed; z-index: 35; inset: 0; display: grid; place-items: center; padding: 18px; background: #17161480; }
+.join-prompt-card { width: min(420px,100%); padding: 28px; border: 1px solid var(--edge); border-radius: 14px; background: linear-gradient(145deg,#fffefa,var(--panel)); box-shadow: 0 20px 60px #080a0d55; animation: joinPromptIn .22s ease-out; }
+.join-prompt-card h2 { margin: 7px 0; font-size: 23px; }
+.join-prompt-card p { margin-bottom: 21px; line-height: 1.5; }
+.join-prompt-actions { display: flex; justify-content: flex-end; gap: 9px; }
+.game-list-item { display: flex; justify-content: space-between; align-items: center; gap: 12px; border-top: 1px solid #e6e2d9; padding-top: 10px; }
+.game-list-details { display: grid; gap: 4px; min-width: 0; }
+.game-list-details strong { overflow-wrap: anywhere; font-size: 12px; }
+.game-list-details span { color: var(--muted); font-size: 10px; line-height: 1.4; }
+.game-list-item .button { flex: 0 0 auto; padding: 7px 10px; font-size: 10px; }
 .time-control-picker { min-width: 0; }
 .time-control-picker select { display: block; margin-top: 2px; }
 .list-item { display: flex; justify-content: space-between; align-items: center; gap: 8px; border-top: 1px solid #e6e2d9; padding-top: 8px; font-size: 12px; }
@@ -117,4 +127,8 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outlin
   .leaderboard-panel { padding: 15px; }
   .profile-card { padding: 20px 15px; }
   .invite-time-card { padding: 21px 15px; }
+  .join-prompt-card { padding: 23px 18px; }
+  .game-list-item { align-items: flex-start; }
+  .game-list-item .button { white-space: normal; }
 }
+@keyframes joinPromptIn { from { opacity: 0; transform: translateY(10px) scale(.97); } to { opacity: 1; transform: none; } }

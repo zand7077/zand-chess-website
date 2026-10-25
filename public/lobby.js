@@ -10,6 +10,9 @@ let friendIds = new Set();
 let dashboardTimer = null;
 let inviteUrl = "";
 let inviteTimeResolver = null;
+const notifiedInvitationCodes = new Set();
+const pendingInvitationPrompts = [];
+let activeInvitationPrompt = null;
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -84,6 +87,30 @@ function openInviteTimePicker(username) {
   return new Promise((resolve) => {
     inviteTimeResolver = resolve;
   });
+}
+
+function showNextInvitationPrompt() {
+  if (activeInvitationPrompt || !pendingInvitationPrompts.length) return;
+  activeInvitationPrompt = pendingInvitationPrompts.shift();
+  document.querySelector("#join-prompt-message").textContent =
+    `${activeInvitationPrompt.inviter} is waiting for you. Join their game when you’re ready.`;
+  document.querySelector("#join-prompt-modal").classList.remove("hidden");
+}
+
+function queueInvitationPrompts(invitations) {
+  for (const invite of invitations) {
+    if (notifiedInvitationCodes.has(invite.room_code)) continue;
+    notifiedInvitationCodes.add(invite.room_code);
+    pendingInvitationPrompts.push(invite);
+  }
+  showNextInvitationPrompt();
+}
+
+async function joinInvitation(invite) {
+  await api(`/api/rooms/${encodeURIComponent(invite.room_code)}/join`, {
+    method: "POST", body: "{}",
+  });
+  window.location.href = `/play?room=${encodeURIComponent(invite.room_code)}`;
 }
 
 function leaderboardEntry(container, leader) {
@@ -294,13 +321,11 @@ async function loadDashboard() {
     const invitations = document.querySelector("#invitation-list");
     invitations.replaceChildren();
     if (!data.invitations.length) invitations.innerHTML = '<p class="muted">No invitations waiting.</p>';
+    queueInvitationPrompts(data.invitations);
     for (const invite of data.invitations) {
-      item(invitations, `${invite.inviter} invited you`, "Accept", async () => {
+      item(invitations, `${invite.inviter} is ready to play`, "Join game", async () => {
         try {
-          await api(`/api/rooms/${encodeURIComponent(invite.room_code)}/join`, {
-            method: "POST", body: "{}",
-          });
-          window.location.href = `/play?room=${encodeURIComponent(invite.room_code)}`;
+          await joinInvitation(invite);
         } catch (error) { tell(error.message); }
       }, true);
     }
@@ -311,9 +336,26 @@ async function loadDashboard() {
     for (const game of data.games) {
       const white = game.white_name || "Guest";
       const black = game.black_name || (game.status === "waiting" ? "Waiting for player" : "Guest");
-      item(games, `${white} vs ${black}`, "Open", () => {
+      const row = document.createElement("div");
+      row.className = "game-list-item";
+      const details = document.createElement("div");
+      details.className = "game-list-details";
+      const players = document.createElement("strong");
+      players.textContent = `${white} vs ${black}`;
+      const status = document.createElement("span");
+      status.textContent = game.status === "waiting"
+        ? "Your room is ready when your opponent joins."
+        : "Your match is in progress. Pick up where you left off.";
+      details.append(players, status);
+      const continueButton = button(
+        game.status === "waiting" ? "View room" : "Rejoin game",
+        () => {
         window.location.href = `/play?room=${encodeURIComponent(game.room_code)}`;
-      });
+        },
+        true,
+      );
+      row.append(details, continueButton);
+      games.append(row);
     }
   } catch (error) {
     tell(error.message);
@@ -451,10 +493,31 @@ document.querySelector("#close-invite-time").addEventListener("click", () => {
 document.querySelector("#invite-time-modal").addEventListener("click", (event) => {
   if (event.target.id === "invite-time-modal") closeInviteTimePicker();
 });
+document.querySelector("#join-prompt-join").addEventListener("click", async () => {
+  if (!activeInvitationPrompt) return;
+  const invite = activeInvitationPrompt;
+  try {
+    await joinInvitation(invite);
+  } catch (error) {
+    tell(error.message);
+    document.querySelector("#join-prompt-modal").classList.add("hidden");
+    activeInvitationPrompt = null;
+    showNextInvitationPrompt();
+  }
+});
+document.querySelector("#join-prompt-later").addEventListener("click", () => {
+  document.querySelector("#join-prompt-modal").classList.add("hidden");
+  activeInvitationPrompt = null;
+  showNextInvitationPrompt();
+});
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" &&
       !document.querySelector("#invite-time-modal").classList.contains("hidden")) {
     closeInviteTimePicker();
+  }
+  if (event.key === "Escape" &&
+      !document.querySelector("#join-prompt-modal").classList.contains("hidden")) {
+    document.querySelector("#join-prompt-later").click();
   }
 });
 
