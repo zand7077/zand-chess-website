@@ -140,8 +140,8 @@ h1,h2,p { margin: 0; }
 .toast { position: fixed; z-index: 8; left: 50%; bottom: 28px; width: min(520px,calc(100% - 28px)); padding: 10px 16px; border: 1px solid #45474b; border-radius: 4px; color: #f5f2eb; background: #303237; box-shadow: 0 8px 22px #26231f30; font-size: 12px; text-align: center; overflow-wrap: anywhere; opacity: 0; transform: translate(-50%,12px); transition: .2s; pointer-events: none; }
 .toast.show { opacity: 1; transform: translate(-50%,0); }
 .move-grade-popup { position: fixed; z-index: 12; inset: 0; display: grid; place-items: center; padding: 20px; pointer-events: none; }
-.move-grade-popup::before { position: absolute; width: min(82vw,440px); aspect-ratio: 1.5; border-radius: 50%; background: radial-gradient(ellipse,#a6503d38 0,transparent 70%); content: ""; animation: moveGradeGlow 1.35s ease both; }
-.move-grade-popup-card { position: relative; display: grid; justify-items: center; gap: 5px; width: min(340px,100%); padding: 10px 18px; color: #292a2c; background: transparent; text-shadow: 0 2px 14px #fffefa,0 0 28px #fffefa; animation: moveGradeCard 1.35s cubic-bezier(.16,.9,.25,1.15) both; }
+.move-grade-popup::before { position: absolute; width: min(82vw,440px); aspect-ratio: 1.5; border-radius: 50%; background: radial-gradient(ellipse,#a6503d38 0,transparent 70%); content: ""; animation: moveGradeGlow 1.8s ease both; }
+.move-grade-popup-card { position: relative; display: grid; justify-items: center; gap: 5px; width: min(340px,100%); padding: 10px 18px; color: #292a2c; background: transparent; text-shadow: 0 2px 14px #fffefa,0 0 28px #fffefa; animation: moveGradeCard 1.8s cubic-bezier(.16,.9,.25,1.15) both; }
 .move-grade-popup-icon { font-size: 34px; line-height: 1; }
 .move-grade-piece { font: 82px/.9 "Segoe UI Symbol",serif; filter: drop-shadow(0 7px 16px #292a2c44); }
 .move-grade-piece.white-piece { color: #fffefa; -webkit-text-stroke: 1px #676862; }

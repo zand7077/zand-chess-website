@@ -160,7 +160,7 @@ function showGradePopup(move) {
   card.append(icon, piece, grade, san);
   popup.append(card);
   document.body.append(popup);
-  state.gradePopupTimer = window.setTimeout(() => popup.remove(), 1400);
+  state.gradePopupTimer = window.setTimeout(() => popup.remove(), 1800);
 }
 
 function roomApiPath(action = "") {
@@ -406,6 +406,20 @@ function renderEvaluation() {
 
 function renderTurn() {
   const white = state.game.turn === "w";
+  const boardColumn = document.querySelector(".board-column");
+  const boardFrame = document.querySelector(".board-frame");
+  const whiteStrip = document.querySelector("#white-name").closest(".player-strip");
+  const blackStrip = document.querySelector("#black-name").closest(".player-strip");
+  const currentStrip = state.game.playerSide === "w" ? whiteStrip : blackStrip;
+  const opponentStrip = state.game.playerSide === "w" ? blackStrip : whiteStrip;
+  boardColumn.insertBefore(opponentStrip, boardFrame);
+  boardFrame.after(currentStrip);
+  currentStrip.classList.add("current-strip");
+  currentStrip.classList.remove("opponent-strip");
+  opponentStrip.classList.add("opponent-strip");
+  opponentStrip.classList.remove("current-strip");
+  currentStrip.querySelector(".player-meta small").textContent = "YOU";
+  opponentStrip.querySelector(".player-meta small").textContent = "OPPONENT";
   document.querySelector("#white-name").textContent = state.game.whiteName.toUpperCase();
   document.querySelector("#black-name").textContent = state.game.blackName.toUpperCase();
   document.querySelector("#white-rating").textContent = `${state.game.whiteRating} ELO`;

@@ -6,6 +6,7 @@ const friendsPanel = document.querySelector("#friends-panel");
 const accountForm = document.querySelector("#account-form");
 let isRegistering = false;
 let signedInUser = null;
+let friendIds = new Set();
 let dashboardTimer = null;
 let inviteUrl = "";
 
@@ -79,7 +80,12 @@ function leaderboardEntry(container, leader) {
       tell(error.message);
     }
   }, true);
-  if (signedInUser?.id === leader.id) {
+  if (friendIds.has(Number(leader.id))) {
+    friendButton.textContent = "Friends";
+    friendButton.disabled = true;
+    friendButton.title = "You are already friends.";
+  } else if (signedInUser?.id === leader.id) {
+    friendButton.textContent = "Your account";
     friendButton.disabled = true;
     friendButton.title = "This is your account.";
   }
@@ -172,6 +178,7 @@ async function openPlayerProfile(userId) {
 
 function setAccountView(user) {
   signedInUser = user;
+  friendIds = new Set();
   const signedIn = Boolean(user);
   accountPanel.classList.toggle("hidden", signedIn);
   friendsPanel.classList.toggle("hidden", !signedIn);
@@ -192,6 +199,8 @@ async function loadDashboard() {
   if (!signedInUser) return;
   try {
     const data = await api("/api/dashboard");
+    friendIds = new Set(data.friends.map((friend) => Number(friend.id)));
+    void loadLeaderboard();
     const friends = document.querySelector("#friend-list");
     friends.replaceChildren();
     if (!data.friends.length) friends.innerHTML = '<p class="muted">No friends yet.</p>';
