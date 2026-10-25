@@ -34,7 +34,9 @@ win, loss, draw, flag, or forfeit using the standard Elo expected-score formula
 (K-factor 32). Guest games do not change account ratings.
 
 Games offer bullet, blitz, and rapid clocks with per-player time and Fischer
-increments. Each player's clock is enforced by the server; a player who runs
+increments. Clocks start once both players have opened the game and pause when
+either leaves; a short heartbeat grace period covers temporary connection
+interruptions. Each player's clock is enforced by the server; a player who runs
 out of time loses. Boards stay oriented from each player's perspective instead
 of flipping every turn.
 

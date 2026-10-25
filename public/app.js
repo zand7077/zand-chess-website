@@ -146,12 +146,15 @@ function showGradePopup(move) {
   popup.dataset.grade = move.grade.toLowerCase().replaceAll(" ", "-");
   popup.setAttribute("role", "status");
   popup.setAttribute("aria-live", "polite");
+  const card = document.createElement("div");
+  card.className = "move-grade-popup-card";
   const icon = gradeIcon(move.grade, "move-grade-popup-icon");
   const grade = document.createElement("strong");
   grade.textContent = move.grade.toUpperCase();
   const san = document.createElement("span");
   san.textContent = move.san;
-  popup.append(icon, grade, san);
+  card.append(icon, grade, san);
+  popup.append(card);
   document.body.append(popup);
   state.gradePopupTimer = window.setTimeout(() => popup.remove(), 1900);
 }
@@ -411,9 +414,11 @@ function renderTurn() {
   document.querySelector("#turn-subtitle").textContent =
     state.game.result || (state.game.status === "waiting"
       ? "Waiting for your opponent to join."
-      : state.game.playerSide !== state.game.turn
-        ? "Waiting for your opponent's move."
-        : state.game.check ? "King is in check." : "Select a piece to move.");
+      : state.game.status === "active" && state.game.clockStartedAt === null
+        ? "Clock paused until both players are in the game."
+        : state.game.playerSide !== state.game.turn
+          ? "Waiting for your opponent's move."
+          : state.game.check ? "King is in check." : "Select a piece to move.");
   document.querySelector("#turn-piece").textContent = white ? "♙" : "♟";
   document.querySelector("#check-banner").classList.toggle("hidden", !state.game.check || state.game.over);
 }
@@ -635,10 +640,12 @@ function formatClock(milliseconds) {
 
 function renderClocks() {
   if (!state.game) return;
-  const elapsed = state.game.status === "active" && !state.game.over
+  const elapsed = state.game.status === "active" && !state.game.over &&
+    state.game.clockStartedAt !== null
     ? Date.now() - state.clockSyncAt : 0;
   for (const [color, side] of [["w", "white"], ["b", "black"]]) {
-    const isRunning = state.game.turn === color && state.game.status === "active";
+    const isRunning = state.game.turn === color && state.game.status === "active" &&
+      state.game.clockStartedAt !== null;
     const remaining = state.game[`${side}TimeMs`] - (isRunning ? elapsed : 0);
     const clock = document.querySelector(`#${side}-clock`);
     clock.textContent = formatClock(remaining);
@@ -696,6 +703,11 @@ async function loadInitialGame() {
 document.querySelector("#elo-modal").addEventListener("click", (event) => {
   if (event.target.id === "elo-modal") event.currentTarget.classList.add("hidden");
 });
+window.addEventListener("pagehide", () => {
+  if (!state.roomCode || !state.game || state.game.status === "completed") return;
+  const body = new Blob(["{}"], { type: "application/json" });
+  navigator.sendBeacon(roomApiPath("/leave"), body);
+});
 makeBoard();
 if (!state.roomCode) {
   window.location.replace("/");
@@ -712,6 +724,7 @@ window.setInterval(async () => {
     const next = await api(roomApiPath());
     if (next.history.length !== state.game.history.length ||
         next.status !== state.game.status || next.result !== state.game.result ||
+        next.clockStartedAt !== state.game.clockStartedAt ||
         next.history.at(-1)?.grade !== state.game.history.at(-1)?.grade) {
       updateGame(next, next.history.length > state.game.history.length);
     } else {

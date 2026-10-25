@@ -18,6 +18,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 ROOT = Path(__file__).resolve().parent
 bp = Blueprint("chess", __name__)
 ROOM_CODE = re.compile(r"^[A-Z2-9]{8}$")
+PRESENCE_TIMEOUT_MS = 5000
 USERNAME = re.compile(r"^[A-Za-z0-9_]{3,20}$")
 PIECE_VALUES = {"p": 1.0, "n": 3.2, "b": 3.3, "r": 5.0, "q": 9.0}
 TIME_CONTROLS = {
@@ -262,6 +263,8 @@ def initialize_database(backend: str, config: dict[str, Any]) -> None:
                     black_time_ms INTEGER NOT NULL DEFAULT 600000,
                     increment_seconds INTEGER NOT NULL DEFAULT 0,
                     clock_started_at INTEGER,
+                    white_last_seen_at INTEGER,
+                    black_last_seen_at INTEGER,
                     result TEXT,
                     status TEXT NOT NULL CHECK(status IN ('waiting', 'active', 'completed')),
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -288,6 +291,8 @@ def initialize_database(backend: str, config: dict[str, Any]) -> None:
                 "black_time_ms": "INTEGER NOT NULL DEFAULT 600000",
                 "increment_seconds": "INTEGER NOT NULL DEFAULT 0",
                 "clock_started_at": "INTEGER",
+                "white_last_seen_at": "INTEGER",
+                "black_last_seen_at": "INTEGER",
             }
             for name, definition in column_types.items():
                 if name not in game_columns:
@@ -346,6 +351,8 @@ def initialize_database(backend: str, config: dict[str, Any]) -> None:
                 black_time_ms BIGINT NOT NULL DEFAULT 600000,
                 increment_seconds INTEGER NOT NULL DEFAULT 0,
                 clock_started_at BIGINT,
+                white_last_seen_at BIGINT,
+                black_last_seen_at BIGINT,
                 result VARCHAR(255),
                 status VARCHAR(16) NOT NULL CHECK(status IN ('waiting', 'active', 'completed')),
                 created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -354,6 +361,8 @@ def initialize_database(backend: str, config: dict[str, Any]) -> None:
             "CREATE UNIQUE INDEX IF NOT EXISTS users_username_lower_unique ON users (LOWER(username))",
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS rating INTEGER NOT NULL DEFAULT 800",
             "ALTER TABLE games ADD COLUMN IF NOT EXISTS rating_changes_json TEXT",
+            "ALTER TABLE games ADD COLUMN IF NOT EXISTS white_last_seen_at BIGINT",
+            "ALTER TABLE games ADD COLUMN IF NOT EXISTS black_last_seen_at BIGINT",
         )
         try:
             for statement in schema:
@@ -412,6 +421,8 @@ def initialize_database(backend: str, config: dict[str, Any]) -> None:
             black_time_ms BIGINT NOT NULL DEFAULT 600000,
             increment_seconds INTEGER NOT NULL DEFAULT 0,
             clock_started_at BIGINT,
+            white_last_seen_at BIGINT,
+            black_last_seen_at BIGINT,
             result VARCHAR(255),
             status VARCHAR(16) NOT NULL,
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -441,6 +452,8 @@ def initialize_database(backend: str, config: dict[str, Any]) -> None:
             "black_time_ms": "BIGINT NOT NULL DEFAULT 600000",
             "increment_seconds": "INTEGER NOT NULL DEFAULT 0",
             "clock_started_at": "BIGINT",
+            "white_last_seen_at": "BIGINT",
+            "black_last_seen_at": "BIGINT",
         }
         for name, definition in column_types.items():
             if name not in columns:
@@ -819,29 +832,98 @@ def remaining_clocks(room: sqlite3.Row, now_ms: int | None = None) -> tuple[int,
     return white_ms, black_ms
 
 
-def finish_on_time(code: str) -> sqlite3.Row | None:
+def synchronize_room_clock(room: sqlite3.Row, now_ms: int) -> sqlite3.Row:
+    if room["status"] != "active":
+        return room
+
+    present = {
+        side: room[f"{side}_last_seen_at"] is not None
+        and now_ms - room[f"{side}_last_seen_at"] <= PRESENCE_TIMEOUT_MS
+        for side in ("white", "black")
+    }
+    started_at = room["clock_started_at"]
+    if all(present.values()) and started_at is not None:
+        white_ms, black_ms = remaining_clocks(room, now_ms)
+        board, _history = room_board(room)
+        if (white_ms if board.turn == chess.WHITE else black_ms) <= 0:
+            result = "Black wins on time" if board.turn == chess.WHITE else "White wins on time"
+            connection = database()
+            connection.execute(
+                """
+                UPDATE games SET status = 'completed', result = ?, white_time_ms = ?,
+                    black_time_ms = ?, clock_started_at = NULL WHERE id = ?
+                """,
+                (result, white_ms, black_ms, room["id"]),
+            )
+            rate_completed_game(connection, room, result)
+            return load_room(room["room_code"])
+
+    if not all(present.values()) and started_at is not None:
+        stale_at = min(
+            room[f"{side}_last_seen_at"] + PRESENCE_TIMEOUT_MS
+            if room[f"{side}_last_seen_at"] is not None else started_at
+            for side in ("white", "black")
+            if not present[side]
+        )
+        stopped_at = max(started_at, min(now_ms, stale_at))
+        elapsed = stopped_at - started_at
+        board, _history = room_board(room)
+        white_ms = int(room["white_time_ms"])
+        black_ms = int(room["black_time_ms"])
+        if board.turn == chess.WHITE:
+            white_ms = max(0, white_ms - elapsed)
+        else:
+            black_ms = max(0, black_ms - elapsed)
+
+        if (white_ms if board.turn == chess.WHITE else black_ms) <= 0:
+            result = "Black wins on time" if board.turn == chess.WHITE else "White wins on time"
+            connection = database()
+            connection.execute(
+                """
+                UPDATE games SET status = 'completed', result = ?, white_time_ms = ?,
+                    black_time_ms = ?, clock_started_at = NULL WHERE id = ?
+                """,
+                (result, white_ms, black_ms, room["id"]),
+            )
+            rate_completed_game(connection, room, result)
+        else:
+            database().execute(
+                """
+                UPDATE games SET white_time_ms = ?, black_time_ms = ?,
+                    clock_started_at = NULL WHERE id = ?
+                """,
+                (white_ms, black_ms, room["id"]),
+            )
+        return load_room(room["room_code"])
+
+    if all(present.values()) and started_at is None:
+        database().execute(
+            "UPDATE games SET clock_started_at = ? WHERE id = ?",
+            (now_ms, room["id"]),
+        )
+        return load_room(room["room_code"])
+    return room
+
+
+def update_room_presence(
+    code: str, side: str, present: bool
+) -> sqlite3.Row | None:
     connection = database()
     connection.execute("BEGIN IMMEDIATE")
     room = load_room(code, for_update=True)
-    if room is None or room["status"] != "active":
-        connection.commit()
-        return room
+    if room is None:
+        connection.rollback()
+        return None
     now_ms = int(time.time() * 1000)
-    white_ms, black_ms = remaining_clocks(room, now_ms)
-    board, _history = room_board(room)
-    expired_side = "w" if board.turn == chess.WHITE else "b"
-    if (white_ms if expired_side == "w" else black_ms) > 0:
-        connection.commit()
-        return room
-    result = "Black wins on time" if expired_side == "w" else "White wins on time"
-    connection.execute(
-        """
-        UPDATE games SET status = 'completed', result = ?, white_time_ms = ?,
-            black_time_ms = ?, clock_started_at = NULL WHERE id = ?
-        """,
-        (result, white_ms, black_ms, room["id"]),
-    )
-    rate_completed_game(connection, room, result)
+    room = synchronize_room_clock(room, now_ms)
+    if room["status"] != "completed":
+        seen_column = "white_last_seen_at" if side == "w" else "black_last_seen_at"
+        seen_at = now_ms if present else now_ms - PRESENCE_TIMEOUT_MS - 1
+        connection.execute(
+            f"UPDATE games SET {seen_column} = ? WHERE id = ?",
+            (seen_at, room["id"]),
+        )
+        room = synchronize_room_clock(load_room(code), now_ms)
     connection.commit()
     return load_room(code)
 
@@ -1080,8 +1162,10 @@ def join_room(code: str):
         return error("That room could not be found.", 404)
     user = current_user()
     visitor = guest_id() if user is None else None
-    if room_side(room, user, visitor or ""):
-        return jsonify(room_snapshot(room, room_side(room, user, visitor or "")))
+    existing_side = room_side(room, user, visitor or "")
+    if existing_side:
+        room = update_room_presence(code.upper(), existing_side, True)
+        return jsonify(room_snapshot(room, existing_side))
     if room["status"] != "waiting" or room["black_user_id"] or room["black_guest_id"]:
         return error("This room already has two players.", 409)
     if room["white_user_id"] is not None and user is not None and room["white_user_id"] == user["id"]:
@@ -1101,11 +1185,12 @@ def join_room(code: str):
     connection.execute(
         """
         UPDATE games SET black_user_id = ?, black_guest_id = ?, status = 'active',
-            clock_started_at = ?
+            black_last_seen_at = ?, clock_started_at = NULL
         WHERE id = ? AND status = 'waiting'
         """,
         (user["id"] if user else None, visitor, int(time.time() * 1000), fresh["id"]),
     )
+    room = synchronize_room_clock(load_room(code.upper()), int(time.time() * 1000))
     connection.commit()
     room = load_room(code.upper())
     return jsonify(room_snapshot(room, "b"))
@@ -1116,8 +1201,6 @@ def get_room_state(code: str):
     room = load_room(code.upper())
     if room is None:
         return error("That room could not be found.", 404)
-    if room["status"] == "active":
-        room = finish_on_time(code.upper())
     user = current_user()
     if (
         room["status"] == "waiting"
@@ -1133,7 +1216,17 @@ def get_room_state(code: str):
     room, side, failure = authorized_room(code)
     if failure:
         return failure
+    room = update_room_presence(code.upper(), side, True)
     return jsonify(room_snapshot(room, side))
+
+
+@bp.post("/api/rooms/<code>/leave")
+def leave_room(code: str):
+    room, side, failure = authorized_room(code)
+    if failure:
+        return failure
+    update_room_presence(code.upper(), side, False)
+    return jsonify(ok=True)
 
 
 @bp.post("/api/rooms/<code>/move")
@@ -1158,6 +1251,20 @@ def make_move(code: str):
     if room["status"] != "active":
         connection.rollback()
         return error("Both players must join before a move can be made.", 409)
+    now_ms = int(time.time() * 1000)
+    room = synchronize_room_clock(room, now_ms)
+    if room["status"] != "active":
+        connection.commit()
+        return jsonify(room_snapshot(room, side))
+    seen_column = "white_last_seen_at" if side == "w" else "black_last_seen_at"
+    connection.execute(
+        f"UPDATE games SET {seen_column} = ? WHERE id = ?",
+        (now_ms, room["id"]),
+    )
+    room = synchronize_room_clock(load_room(code.upper()), now_ms)
+    if room["status"] != "active":
+        connection.commit()
+        return jsonify(room_snapshot(room, side))
     board, _history = room_board(room)
     if ("w" if board.turn else "b") != side:
         connection.rollback()
@@ -1171,7 +1278,6 @@ def make_move(code: str):
     if move not in board.legal_moves:
         connection.rollback()
         return error("That move is not legal.")
-    now_ms = int(time.time() * 1000)
     white_ms, black_ms = remaining_clocks(room, now_ms)
     remaining_ms = white_ms if board.turn == chess.WHITE else black_ms
     if remaining_ms <= 0:
@@ -1200,7 +1306,7 @@ def make_move(code: str):
         """
         UPDATE games SET moves_json = ?, grades_json = ?, result = ?,
             status = ?, white_time_ms = ?, black_time_ms = ?,
-            clock_started_at = ? WHERE id = ?
+            clock_started_at = NULL WHERE id = ?
         """,
         (
             json.dumps(moves),
@@ -1209,12 +1315,13 @@ def make_move(code: str):
             "completed" if result else "active",
             white_ms,
             black_ms,
-            None if result else int(time.time() * 1000),
             room["id"],
         ),
     )
     if result:
         rate_completed_game(connection, room, result)
+    else:
+        synchronize_room_clock(load_room(code.upper()), int(time.time() * 1000))
     connection.commit()
     room = load_room(code.upper())
     return jsonify(room_snapshot(room, side))
@@ -1308,8 +1415,22 @@ def forfeit(code: str):
     if room["status"] != "active":
         connection.rollback()
         return error("Only an active game can be forfeited.", 409)
+    now_ms = int(time.time() * 1000)
+    room = synchronize_room_clock(room, now_ms)
+    if room["status"] != "active":
+        connection.commit()
+        return jsonify(room_snapshot(room, side))
+    seen_column = "white_last_seen_at" if side == "w" else "black_last_seen_at"
+    connection.execute(
+        f"UPDATE games SET {seen_column} = ? WHERE id = ?",
+        (now_ms, room["id"]),
+    )
+    room = synchronize_room_clock(load_room(code.upper()), now_ms)
+    if room["status"] != "active":
+        connection.commit()
+        return jsonify(room_snapshot(room, side))
     result = "Black wins by forfeit" if side == "w" else "White wins by forfeit"
-    white_ms, black_ms = remaining_clocks(room)
+    white_ms, black_ms = remaining_clocks(room, now_ms)
     connection.execute(
         """
         UPDATE games SET status = 'completed', result = ?, white_time_ms = ?,
@@ -1340,18 +1461,23 @@ def restart_game(code: str):
         return error("A new game can start after this match ends.", 409)
     clock = TIME_CONTROLS.get(room["time_control"], TIME_CONTROLS["rapid_10_0"])
     starting_ms = int(clock["seconds"]) * 1000
+    seen_column = "white_last_seen_at" if side == "w" else "black_last_seen_at"
     connection.execute(
         """
         UPDATE games SET moves_json = '[]', grades_json = '[]', rating_changes_json = NULL, result = NULL,
             status = CASE WHEN black_user_id IS NOT NULL OR black_guest_id IS NOT NULL
                           THEN 'active' ELSE 'waiting' END,
             white_time_ms = ?, black_time_ms = ?,
-            clock_started_at = CASE WHEN black_user_id IS NOT NULL OR black_guest_id IS NOT NULL
-                                    THEN ? ELSE NULL END
+            clock_started_at = NULL
         WHERE id = ?
         """,
-        (starting_ms, starting_ms, int(time.time() * 1000), room["id"]),
+        (starting_ms, starting_ms, room["id"]),
     )
+    connection.execute(
+        f"UPDATE games SET {seen_column} = ? WHERE id = ?",
+        (int(time.time() * 1000), room["id"]),
+    )
+    synchronize_room_clock(load_room(code.upper()), int(time.time() * 1000))
     connection.commit()
     return jsonify(room_snapshot(load_room(code.upper()), side))
 
