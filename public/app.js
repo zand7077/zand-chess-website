@@ -33,6 +33,7 @@ const state = {
   gradePopupTimer: null,
   animatedPly: 0,
   gradeAnimationPlayedPly: 0,
+  lowTimeWarningActive: false,
 };
 const squares = new Map();
 const gridSquares = new Map();
@@ -459,6 +460,9 @@ function render() {
   renderEvaluation();
   document.querySelector("#forfeit-game").disabled =
     state.game.over || state.game.status !== "active" || state.busy;
+  const closeRoomButton = document.querySelector("#close-room");
+  closeRoomButton.disabled = state.game.over || state.busy ||
+    (state.game.status === "waiting" && state.game.playerSide !== "w");
   document.querySelector("#new-game").disabled = !state.game.over || state.busy;
   const waitingModal = document.querySelector("#waiting-modal");
   waitingModal.classList.toggle(
@@ -686,6 +690,24 @@ async function forfeitGame() {
   }
 }
 
+async function closeRoom() {
+  if (!state.game || state.game.over || state.busy) return;
+  const confirmation = state.game.status === "active"
+    ? "Close this active game? This will forfeit the match and may change both players’ ratings."
+    : "Close this waiting room? Your opponent will no longer be able to join.";
+  if (!window.confirm(confirmation)) return;
+  state.busy = true;
+  document.querySelector("#close-room").disabled = true;
+  try {
+    await api(roomApiPath("/close"), { method: "POST", body: "{}" });
+    window.location.replace("/");
+  } catch (error) {
+    showToast(error.message);
+    state.busy = false;
+    render();
+  }
+}
+
 function updateClock() {
   renderClocks();
 }
@@ -711,6 +733,26 @@ function renderClocks() {
     clock.classList.toggle("active", isRunning && !state.game.over);
     clock.classList.toggle("low", remaining <= 20000);
   }
+  const playerClock = state.game.playerSide === "w"
+    ? state.game.whiteTimeMs - (state.game.turn === "w" ? elapsed : 0)
+    : state.game.blackTimeMs - (state.game.turn === "b" ? elapsed : 0);
+  const oneMinuteWarning = state.game.status === "active" && !state.game.over &&
+    playerClock <= 60000 && playerClock > 20000;
+  const minuteWarning = document.querySelector("#time-warning");
+  minuteWarning.classList.toggle("hidden", !oneMinuteWarning);
+  minuteWarning.setAttribute("aria-hidden", String(!oneMinuteWarning));
+  const warningActive = state.game.status === "active" && !state.game.over &&
+    playerClock <= 20000;
+  const warning = document.querySelector("#low-time-warning");
+  warning.classList.toggle("hidden", !warningActive);
+  warning.setAttribute("aria-hidden", String(!warningActive));
+  document.querySelector("#low-time-countdown").textContent = formatClock(playerClock);
+  if (warningActive !== state.lowTimeWarningActive) {
+    document.querySelector("#low-time-announcement").textContent = warningActive
+      ? "Low time. You have 20 seconds or less remaining."
+      : "";
+    state.lowTimeWarningActive = warningActive;
+  }
 }
 
 document.querySelector("#new-game").addEventListener("click", newGame);
@@ -721,6 +763,7 @@ document.querySelector("#decline-rematch").addEventListener("click", () => {
   void respondToRematch(false);
 });
 document.querySelector("#forfeit-game").addEventListener("click", forfeitGame);
+document.querySelector("#close-room").addEventListener("click", closeRoom);
 document.querySelector("#flip-board").addEventListener("click", () => {
   state.flipped = !state.flipped;
   renderBoard();

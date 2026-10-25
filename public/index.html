@@ -72,12 +72,23 @@
           <button class="action-button forfeit-button" id="forfeit-game">FORFEIT</button>
           <button class="action-button secondary" id="share-room" title="Copy invite link">INVITE</button>
           <button class="action-button secondary" id="flip-board" title="Flip board">⇅</button>
+          <button class="action-button close-room-button" id="close-room">CLOSE ROOM</button>
         </div>
         <footer>Move analysis powered by Stockfish 19 Lite.</footer>
       </aside>
     </section>
   </main>
 
+  <div id="low-time-warning" class="low-time-warning hidden" aria-hidden="true">
+    <span class="low-time-icon" aria-hidden="true">!</span>
+    <span class="low-time-label">LOW TIME</span>
+    <span id="low-time-countdown" class="low-time-countdown" aria-live="off">0:20</span>
+  </div>
+  <div id="time-warning" class="time-warning hidden" aria-hidden="true">
+    <span class="time-warning-icon" aria-hidden="true">◷</span>
+    <span>1 MIN LEFT</span>
+  </div>
+  <span id="low-time-announcement" class="visually-hidden" role="status" aria-live="polite"></span>
   <div id="toast" class="toast" role="status"></div>
   <div id="waiting-modal" class="modal hidden" role="status" aria-live="polite">
     <div class="modal-card waiting-card">
