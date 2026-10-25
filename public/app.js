@@ -38,7 +38,9 @@ const squares = new Map();
 const gridSquares = new Map();
 const squareParts = new Map();
 const stockfish = new Worker("/engine/stockfish-19-lite-single.js");
-const gradePopupNames = new Set(["Brilliant", "Excellent", "Blunder", "Grave error"]);
+const gradePopupNames = new Set([
+  "Brilliant", "Excellent", "Blunder", "Grave error", "Missed win",
+]);
 
 state.engineReady = new Promise((resolve, reject) => {
   const timeout = window.setTimeout(
@@ -63,9 +65,11 @@ state.engineReady = new Promise((resolve, reject) => {
     if (!pending) return;
     const score = line.match(/\bscore (cp|mate) (-?\d+)/);
     if (score) {
-      pending.score = score[1] === "mate"
-        ? (Number(score[2]) > 0 ? 10000 : -10000)
-        : Number(score[2]);
+      const mate = score[1] === "mate" ? Number(score[2]) : null;
+      pending.score = {
+        value: mate === null ? Number(score[2]) : (mate > 0 ? 10000 : -10000),
+        mate,
+      };
     }
     if (line.startsWith("bestmove")) {
       window.clearTimeout(pending.timeout);
@@ -107,10 +111,14 @@ function stockfishScore(fen) {
 async function analyzeLastMove(beforeFen, next, ply) {
   const bestBefore = await stockfishScore(beforeFen);
   const afterScore = await stockfishScore(next.fen);
-  const centipawnLoss = Math.max(0, Math.min(3000, Math.round(bestBefore + afterScore)));
+  const missedWin = bestBefore.mate !== null && bestBefore.mate > 0 &&
+    !(afterScore.mate !== null && afterScore.mate < 0);
+  const centipawnLoss = missedWin
+    ? 3000
+    : Math.max(0, Math.min(3000, Math.round(bestBefore.value + afterScore.value)));
   const whiteEvaluation = Math.max(
     -10000,
-    Math.min(10000, Math.round(next.turn === "w" ? afterScore : -afterScore)),
+    Math.min(10000, Math.round(next.turn === "w" ? afterScore.value : -afterScore.value)),
   );
   const analyzed = await api(roomApiPath("/analysis"), {
     method: "POST",
@@ -118,6 +126,7 @@ async function analyzeLastMove(beforeFen, next, ply) {
       ply,
       centipawnLoss,
       evaluation: whiteEvaluation,
+      missedWin,
     }),
   });
   await updateGame(analyzed);

@@ -1416,6 +1416,7 @@ def submit_move_analysis(code: str):
     ply = body.get("ply")
     centipawn_loss = body.get("centipawnLoss")
     evaluation = body.get("evaluation")
+    missed_win = body.get("missedWin", False)
     if (
         not isinstance(ply, int)
         or isinstance(ply, bool)
@@ -1423,6 +1424,7 @@ def submit_move_analysis(code: str):
         or isinstance(centipawn_loss, bool)
         or not isinstance(evaluation, int)
         or isinstance(evaluation, bool)
+        or not isinstance(missed_win, bool)
         or not 1 <= ply <= 1000
         or not 0 <= centipawn_loss <= 3000
         or not -10000 <= evaluation <= 10000
@@ -1449,7 +1451,9 @@ def submit_move_analysis(code: str):
     for uci in moves[:ply - 1]:
         board_before.push_uci(uci)
     played_move = chess.Move.from_uci(moves[ply - 1])
-    if centipawn_loss <= 10 and is_brilliant_sacrifice(board_before, played_move):
+    if missed_win:
+        grade = "Missed win"
+    elif centipawn_loss <= 10 and is_brilliant_sacrifice(board_before, played_move):
         grade = "Brilliant"
     elif centipawn_loss >= 500:
         grade = "Grave error"

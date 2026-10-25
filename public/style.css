@@ -150,12 +150,23 @@ h1,h2,p { margin: 0; }
 .move-grade-popup-card>span:last-child { color: #77766f; font: 700 15px "DM Mono",monospace; }
 .move-grade-popup[data-grade="brilliant"]::before { background: radial-gradient(ellipse,#c2a15e66 0,transparent 70%); }
 .move-grade-popup[data-grade="brilliant"] .move-grade-popup-icon,.move-grade-popup[data-grade="brilliant"] strong { color: #765b3c; }
+.move-grade-popup[data-grade="brilliant"]::after { position: absolute; width: min(68vw,340px); aspect-ratio: 1; border: 1px solid #c2a15e99; border-radius: 50%; box-shadow: 0 0 0 12px #c2a15e1c,0 0 0 28px #c2a15e12,0 0 42px #bd9a4b66; content: ""; animation: brilliantRings 1.8s ease-out both; }
+.move-grade-popup[data-grade="brilliant"] .move-grade-popup-card { animation-name: brilliantCard; }
+.move-grade-popup[data-grade="brilliant"] .move-grade-popup-icon { animation: brilliantSpark 1.8s ease both; }
 .move-grade-popup[data-grade="excellent"]::before { background: radial-gradient(ellipse,#4d668755 0,transparent 70%); }
 .move-grade-popup[data-grade="excellent"] .move-grade-popup-icon,.move-grade-popup[data-grade="excellent"] strong { color: #354e70; }
 .move-grade-popup[data-grade="blunder"]::before { background: radial-gradient(ellipse,#df726455 0,transparent 70%); }
 .move-grade-popup[data-grade="blunder"] .move-grade-popup-icon,.move-grade-popup[data-grade="blunder"] strong { color: #913b36; }
 .move-grade-popup[data-grade="grave-error"]::before { background: radial-gradient(ellipse,#a8433d77 0,transparent 70%); }
 .move-grade-popup[data-grade="grave-error"] .move-grade-popup-icon,.move-grade-popup[data-grade="grave-error"] strong { color: #752c2a; }
+.move-grade-popup[data-grade="grave-error"]::after { position: absolute; width: min(68vw,340px); aspect-ratio: 1; border: 1px solid #a8433d99; border-radius: 50%; box-shadow: 0 0 0 10px #a8433d22,0 0 0 25px #752c2a18,0 0 44px #a8433d66; content: ""; animation: graveRings 1.8s ease-out both; }
+.move-grade-popup[data-grade="grave-error"] .move-grade-popup-card { animation-name: graveCard; }
+.move-grade-popup[data-grade="grave-error"] .move-grade-popup-icon { animation: graveImpact 1.8s ease both; }
+.move-grade-popup[data-grade="missed-win"]::before { background: radial-gradient(ellipse,#752c2a88 0,#a8433d40 42%,transparent 72%); }
+.move-grade-popup[data-grade="missed-win"] .move-grade-popup-icon,.move-grade-popup[data-grade="missed-win"] strong { color: #752c2a; }
+.move-grade-popup[data-grade="missed-win"]::after { position: absolute; width: min(68vw,340px); aspect-ratio: 1; border: 2px dashed #752c2acc; border-radius: 50%; box-shadow: 0 0 0 12px #a8433d24,0 0 38px #752c2a88; content: ""; animation: missedWinRings 1.8s ease-in both; }
+.move-grade-popup[data-grade="missed-win"] .move-grade-popup-card { animation-name: missedWinCard; }
+.move-grade-popup[data-grade="missed-win"] .move-grade-popup-icon { animation: missedWinIcon 1.8s ease both; }
 .modal { position: fixed; z-index: 20; inset: 0; display: grid; place-items: center; padding: 20px; background: rgba(36,34,31,.62); }
 .modal-card { position: relative; width: min(420px,100%); padding: 30px; border: 1px solid var(--panel-edge); border-radius: 6px; background: #f5f2eb; text-align: center; box-shadow: 0 18px 55px #17161440; animation: modalIn .22s ease-out; }
 .modal-close { position: absolute; top: 12px; right: 15px; border: 0; color: var(--muted); background: transparent; cursor: pointer; font-size: 24px; }
@@ -186,6 +197,15 @@ h1,h2,p { margin: 0; }
 @keyframes gradeIconPop { 0% { opacity: 0; transform: translateY(8px) scale(.45) rotate(-24deg); } 55% { opacity: 1; transform: translateY(-2px) scale(1.45) rotate(8deg); } 78% { transform: translateY(0) scale(.92) rotate(-3deg); } 100% { opacity: 1; transform: none; } }
 @keyframes moveGradeGlow { 0% { opacity: 0; transform: scale(.55); } 18%,78% { opacity: 1; transform: scale(1); } 100% { opacity: 0; transform: scale(1.2); } }
 @keyframes moveGradeCard { 0% { opacity: 0; transform: translateY(34px) scale(.55) rotate(-5deg); } 14% { opacity: 1; transform: translateY(-7px) scale(1.08) rotate(1deg); } 22%,72% { opacity: 1; transform: translateY(0) scale(1) rotate(0); } 100% { opacity: 0; transform: translateY(-30px) scale(.92); } }
+@keyframes brilliantRings { 0% { opacity: 0; transform: scale(.3) rotate(-35deg); } 20% { opacity: .95; } 75% { opacity: .7; transform: scale(1) rotate(100deg); } 100% { opacity: 0; transform: scale(1.18) rotate(150deg); } }
+@keyframes brilliantCard { 0% { opacity: 0; transform: translateY(24px) scale(.5); filter: drop-shadow(0 0 0 #c2a15e00); } 18% { opacity: 1; transform: translateY(-8px) scale(1.12); filter: drop-shadow(0 0 26px #c2a15e); } 30%,74% { opacity: 1; transform: translateY(0) scale(1); filter: drop-shadow(0 0 14px #c2a15e99); } 100% { opacity: 0; transform: translateY(-28px) scale(.94); filter: drop-shadow(0 0 0 #c2a15e00); } }
+@keyframes brilliantSpark { 0%,100% { opacity: .65; transform: rotate(0) scale(.8); } 20%,70% { opacity: 1; transform: rotate(45deg) scale(1.65); filter: drop-shadow(0 0 18px #c2a15e); } }
+@keyframes graveRings { 0% { opacity: 0; transform: scale(.2); } 12% { opacity: 1; transform: scale(.72); } 22% { opacity: .35; transform: scale(.65); } 40% { opacity: .8; transform: scale(.9); } 100% { opacity: 0; transform: scale(1.18); } }
+@keyframes graveCard { 0% { opacity: 0; transform: scale(1.5); filter: blur(8px); } 12% { opacity: 1; transform: scale(.88); filter: blur(0) drop-shadow(0 0 24px #a8433d); } 18% { transform: translateX(-9px) scale(1.04); } 24% { transform: translateX(8px) scale(1); } 30%,72% { opacity: 1; transform: translateX(0) scale(1); filter: drop-shadow(0 0 13px #a8433d99); } 100% { opacity: 0; transform: translateY(-22px) scale(.9); filter: blur(3px); } }
+@keyframes graveImpact { 0%,100% { opacity: .7; transform: rotate(0) scale(.8); } 12% { opacity: 1; transform: rotate(-22deg) scale(1.8); filter: drop-shadow(0 0 16px #a8433d); } 22% { transform: rotate(14deg) scale(1.1); } 32%,70% { opacity: 1; transform: rotate(0) scale(1.2); } }
+@keyframes missedWinRings { 0% { opacity: 0; transform: scale(1.35) rotate(0); } 18% { opacity: 1; transform: scale(.82) rotate(-18deg); } 42% { opacity: .7; transform: scale(1.02) rotate(12deg); } 100% { opacity: 0; transform: scale(.65) rotate(35deg); } }
+@keyframes missedWinCard { 0% { opacity: 0; transform: translateY(-28px) scale(1.2); filter: blur(6px); } 15% { opacity: 1; transform: translateY(7px) scale(.95); filter: blur(0) drop-shadow(0 0 20px #752c2a); } 24% { transform: translateY(-3px) scale(1.02); } 32%,70% { opacity: 1; transform: translateY(0) scale(1); filter: drop-shadow(0 0 12px #a8433d99); } 100% { opacity: 0; transform: translateY(24px) scale(.9); filter: blur(3px); } }
+@keyframes missedWinIcon { 0%,100% { opacity: .7; transform: rotate(0) scale(.8); } 15% { opacity: 1; transform: rotate(-35deg) scale(1.7); filter: drop-shadow(0 0 14px #752c2a); } 28%,68% { opacity: 1; transform: rotate(0) scale(1.2); } }
 @media (max-width: 900px) {
   .app-shell { width: min(720px,100% - 32px); }
   .arena { grid-template-columns: minmax(0,1fr) 285px; gap: 18px; }
