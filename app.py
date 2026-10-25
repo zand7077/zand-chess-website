@@ -22,6 +22,130 @@ PIECE_VALUES = {"p": 1.0, "n": 3.2, "b": 3.3, "r": 5.0, "q": 9.0}
 MATE_SCORE = 10000
 
 
+class DatabaseIntegrityError(Exception):
+    pass
+
+
+class DatabaseConnection:
+    def __init__(self, connection, backend: str) -> None:
+        self.connection = connection
+        self.backend = backend
+
+    def execute(self, query: str, parameters: tuple = ()):
+        if self.backend == "sqlite":
+            try:
+                return self.connection.execute(query, parameters)
+            except sqlite3.IntegrityError as exception:
+                raise DatabaseIntegrityError from exception
+
+        ignore_conflict = bool(re.search(r"INSERT\s+OR\s+IGNORE\s+INTO", query, re.IGNORECASE))
+        query = re.sub(
+            r"([A-Za-z_.]+)\s*=\s*\?\s+COLLATE NOCASE",
+            r"LOWER(\1) = LOWER(?)",
+            query,
+            flags=re.IGNORECASE,
+        )
+        query = re.sub(
+            r"([A-Za-z_.]+)\s+COLLATE NOCASE",
+            r"LOWER(\1)",
+            query,
+            flags=re.IGNORECASE,
+        )
+        query = query.replace("?", "%s")
+        if self.backend == "postgres":
+            query = re.sub(
+                r"INSERT\s+OR\s+IGNORE\s+INTO",
+                "INSERT INTO",
+                query,
+                flags=re.IGNORECASE,
+            )
+            if ignore_conflict:
+                query = query.rstrip().rstrip(";") + " ON CONFLICT DO NOTHING"
+            query = re.sub(r"BEGIN\s+IMMEDIATE", "BEGIN", query, flags=re.IGNORECASE)
+            import psycopg
+
+            try:
+                return self.connection.execute(query, parameters)
+            except psycopg.IntegrityError as exception:
+                raise DatabaseIntegrityError from exception
+
+        if self.backend == "mysql":
+            query = re.sub(
+                r"INSERT\s+OR\s+IGNORE\s+INTO",
+                "INSERT IGNORE INTO",
+                query,
+                flags=re.IGNORECASE,
+            )
+            query = re.sub(r"BEGIN\s+IMMEDIATE", "BEGIN", query, flags=re.IGNORECASE)
+            import pymysql
+
+            try:
+                cursor = self.connection.cursor()
+                cursor.execute(query, parameters)
+                return cursor
+            except pymysql.err.IntegrityError as exception:
+                raise DatabaseIntegrityError from exception
+
+        raise RuntimeError(f"Unsupported database backend: {self.backend}")
+
+    def commit(self) -> None:
+        self.connection.commit()
+
+    def rollback(self) -> None:
+        self.connection.rollback()
+
+    def close(self) -> None:
+        self.connection.close()
+
+
+def connect_database(backend: str, config: dict[str, Any]) -> DatabaseConnection:
+    if backend == "sqlite":
+        connection = sqlite3.connect(config["DATABASE"], timeout=10)
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
+        return DatabaseConnection(connection, backend)
+    if backend == "postgres":
+        import psycopg
+        from psycopg.rows import dict_row
+
+        ca_file = config.get("DB_SSL_CA")
+        ssl_options = (
+            {"sslmode": "verify-full", "sslrootcert": ca_file}
+            if ca_file else {"sslmode": "require"}
+        )
+        connection = psycopg.connect(
+            host=config["DB_HOST"],
+            port=int(config["DB_PORT"]),
+            dbname=config["DB_NAME"],
+            user=config["DB_USERNAME"],
+            password=config["DB_PASSWORD"],
+            **ssl_options,
+            row_factory=dict_row,
+            connect_timeout=10,
+        )
+        return DatabaseConnection(connection, backend)
+    if backend == "mysql":
+        import pymysql
+        from pymysql.cursors import DictCursor
+
+        connection = pymysql.connect(
+            host=config["DB_HOST"],
+            port=int(config["DB_PORT"]),
+            database=config["DB_NAME"],
+            user=config["DB_USERNAME"],
+            password=config["DB_PASSWORD"],
+            charset="utf8mb4",
+            cursorclass=DictCursor,
+            connect_timeout=10,
+            ssl_disabled=False,
+            ssl_ca=config.get("DB_SSL_CA"),
+            ssl_verify_cert=bool(config.get("DB_SSL_CA")),
+            ssl_verify_identity=bool(config.get("DB_SSL_CA")),
+        )
+        return DatabaseConnection(connection, backend)
+    raise RuntimeError(f"Unsupported database backend: {backend}")
+
+
 def create_app(
     database_path: str | Path | None = None,
     secret_key: str | None = None,
@@ -40,77 +164,240 @@ def create_app(
             else secure_cookies.lower() == "true"
         ),
     )
-    app.config["DATABASE"] = str(
-        database_path or os.environ.get("CHESS_DATABASE") or ROOT / "chess.sqlite3"
-    )
-
-    Path(app.config["DATABASE"]).parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(app.config["DATABASE"])
-    try:
-        connection.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY,
-                username TEXT NOT NULL UNIQUE COLLATE NOCASE,
-                password_hash TEXT NOT NULL,
-                rating INTEGER NOT NULL DEFAULT 800,
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-            );
-            CREATE TABLE IF NOT EXISTS friend_requests (
-                id INTEGER PRIMARY KEY,
-                sender_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                receiver_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(sender_id, receiver_id),
-                CHECK(sender_id != receiver_id)
-            );
-            CREATE TABLE IF NOT EXISTS friendships (
-                user_one INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                user_two INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY(user_one, user_two),
-                CHECK(user_one < user_two)
-            );
-            CREATE TABLE IF NOT EXISTS games (
-                id INTEGER PRIMARY KEY,
-                room_code TEXT NOT NULL UNIQUE,
-                white_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
-                black_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
-                white_guest_id TEXT,
-                black_guest_id TEXT,
-                invited_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
-                moves_json TEXT NOT NULL DEFAULT '[]',
-                grades_json TEXT NOT NULL DEFAULT '[]',
-                rating_changes_json TEXT,
-                result TEXT,
-                status TEXT NOT NULL CHECK(status IN ('waiting', 'active', 'completed')),
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-            );
-            """
-        )
-        user_columns = {
-            row[1] for row in connection.execute("PRAGMA table_info(users)")
-        }
-        if "rating" not in user_columns:
-            connection.execute(
-                "ALTER TABLE users ADD COLUMN rating INTEGER NOT NULL DEFAULT 800"
+    wasmer_database = {
+        name: os.environ.get(name)
+        for name in ("DB_HOST", "DB_PORT", "DB_NAME", "DB_USERNAME", "DB_PASSWORD")
+    }
+    if database_path is not None or not wasmer_database["DB_HOST"]:
+        if os.environ.get("CHESS_ENV", "").lower() == "production":
+            raise RuntimeError(
+                "Production requires Wasmer's managed database connection variables."
             )
-        game_columns = {
-            row[1] for row in connection.execute("PRAGMA table_info(games)")
-        }
-        if "rating_changes_json" not in game_columns:
-            connection.execute("ALTER TABLE games ADD COLUMN rating_changes_json TEXT")
-    finally:
-        connection.close()
+        app.config["DATABASE_BACKEND"] = "sqlite"
+        app.config["DATABASE"] = str(
+            database_path or os.environ.get("CHESS_DATABASE") or ROOT / "chess.sqlite3"
+        )
+        Path(app.config["DATABASE"]).parent.mkdir(parents=True, exist_ok=True)
+    else:
+        missing = [name for name, value in wasmer_database.items() if not value]
+        if missing:
+            raise RuntimeError(
+                "Wasmer database configuration is incomplete: "
+                + ", ".join(missing)
+            )
+        configured_engine = os.environ.get("CHESS_DB_ENGINE", "").lower()
+        host = wasmer_database["DB_HOST"].lower()
+        if configured_engine in ("postgres", "postgresql"):
+            backend = "postgres"
+        elif configured_engine == "mysql":
+            backend = "mysql"
+        elif host.startswith("psql."):
+            backend = "postgres"
+        elif host.startswith("db."):
+            backend = "mysql"
+        else:
+            raise RuntimeError(
+                "Cannot identify Wasmer database engine from DB_HOST. "
+                "Set CHESS_DB_ENGINE to 'postgres' or 'mysql'."
+            )
+        app.config["DATABASE_BACKEND"] = backend
+        app.config.update(wasmer_database)
+        app.config["DB_SSL_CA"] = os.environ.get("CHESS_DB_SSL_CA")
+
+    initialize_database(app.config["DATABASE_BACKEND"], app.config)
     app.register_blueprint(bp)
     return app
 
 
-def database() -> sqlite3.Connection:
+def initialize_database(backend: str, config: dict[str, Any]) -> None:
+    if backend == "sqlite":
+        connection = sqlite3.connect(config["DATABASE"])
+        try:
+            connection.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS users (
+                    id INTEGER PRIMARY KEY,
+                    username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                    password_hash TEXT NOT NULL,
+                    rating INTEGER NOT NULL DEFAULT 800,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE TABLE IF NOT EXISTS friend_requests (
+                    id INTEGER PRIMARY KEY,
+                    sender_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    receiver_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(sender_id, receiver_id),
+                    CHECK(sender_id != receiver_id)
+                );
+                CREATE TABLE IF NOT EXISTS friendships (
+                    user_one INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    user_two INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY(user_one, user_two),
+                    CHECK(user_one < user_two)
+                );
+                CREATE TABLE IF NOT EXISTS games (
+                    id INTEGER PRIMARY KEY,
+                    room_code TEXT NOT NULL UNIQUE,
+                    white_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                    black_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                    white_guest_id TEXT,
+                    black_guest_id TEXT,
+                    invited_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                    moves_json TEXT NOT NULL DEFAULT '[]',
+                    grades_json TEXT NOT NULL DEFAULT '[]',
+                    rating_changes_json TEXT,
+                    result TEXT,
+                    status TEXT NOT NULL CHECK(status IN ('waiting', 'active', 'completed')),
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                """
+            )
+            user_columns = {
+                row[1] for row in connection.execute("PRAGMA table_info(users)")
+            }
+            if "rating" not in user_columns:
+                connection.execute(
+                    "ALTER TABLE users ADD COLUMN rating INTEGER NOT NULL DEFAULT 800"
+                )
+            game_columns = {
+                row[1] for row in connection.execute("PRAGMA table_info(games)")
+            }
+            if "rating_changes_json" not in game_columns:
+                connection.execute(
+                    "ALTER TABLE games ADD COLUMN rating_changes_json TEXT"
+                )
+        finally:
+            connection.close()
+        return
+
+    connection = connect_database(backend, config)
+    if backend == "postgres":
+        schema = (
+            """
+            CREATE TABLE IF NOT EXISTS users (
+                id BIGSERIAL PRIMARY KEY,
+                username VARCHAR(20) NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL,
+                rating INTEGER NOT NULL DEFAULT 800,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS friend_requests (
+                id BIGSERIAL PRIMARY KEY,
+                sender_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                receiver_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(sender_id, receiver_id),
+                CHECK(sender_id != receiver_id)
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS friendships (
+                user_one BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                user_two BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY(user_one, user_two),
+                CHECK(user_one < user_two)
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS games (
+                id BIGSERIAL PRIMARY KEY,
+                room_code VARCHAR(8) NOT NULL UNIQUE,
+                white_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+                black_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+                white_guest_id TEXT,
+                black_guest_id TEXT,
+                invited_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+                moves_json TEXT NOT NULL DEFAULT '[]',
+                grades_json TEXT NOT NULL DEFAULT '[]',
+                rating_changes_json TEXT,
+                result VARCHAR(255),
+                status VARCHAR(16) NOT NULL CHECK(status IN ('waiting', 'active', 'completed')),
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            "CREATE UNIQUE INDEX IF NOT EXISTS users_username_lower_unique ON users (LOWER(username))",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS rating INTEGER NOT NULL DEFAULT 800",
+            "ALTER TABLE games ADD COLUMN IF NOT EXISTS rating_changes_json TEXT",
+        )
+        try:
+            for statement in schema:
+                connection.execute(statement)
+            connection.commit()
+        finally:
+            connection.close()
+        return
+
+    schema = (
+        """
+        CREATE TABLE IF NOT EXISTS users (
+            id BIGINT AUTO_INCREMENT PRIMARY KEY,
+            username VARCHAR(20) NOT NULL UNIQUE,
+            username_key VARCHAR(20) GENERATED ALWAYS AS (LOWER(username)) STORED UNIQUE,
+            password_hash TEXT NOT NULL,
+            rating INTEGER NOT NULL DEFAULT 800,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS friend_requests (
+            id BIGINT AUTO_INCREMENT PRIMARY KEY,
+            sender_id BIGINT NOT NULL,
+            receiver_id BIGINT NOT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(sender_id, receiver_id),
+            FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (receiver_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS friendships (
+            user_one BIGINT NOT NULL,
+            user_two BIGINT NOT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY(user_one, user_two),
+            FOREIGN KEY (user_one) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_two) REFERENCES users(id) ON DELETE CASCADE
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS games (
+            id BIGINT AUTO_INCREMENT PRIMARY KEY,
+            room_code VARCHAR(8) NOT NULL UNIQUE,
+            white_user_id BIGINT,
+            black_user_id BIGINT,
+            white_guest_id VARCHAR(64),
+            black_guest_id VARCHAR(64),
+            invited_user_id BIGINT,
+            moves_json TEXT NOT NULL,
+            grades_json TEXT NOT NULL,
+            rating_changes_json TEXT,
+            result VARCHAR(255),
+            status VARCHAR(16) NOT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (white_user_id) REFERENCES users(id) ON DELETE SET NULL,
+            FOREIGN KEY (black_user_id) REFERENCES users(id) ON DELETE SET NULL,
+            FOREIGN KEY (invited_user_id) REFERENCES users(id) ON DELETE SET NULL
+        )
+        """,
+    )
+    try:
+        for statement in schema:
+            connection.execute(statement)
+        connection.commit()
+    finally:
+        connection.close()
+
+
+def database() -> DatabaseConnection:
     if "database" not in g:
-        connection = sqlite3.connect(current_app.config["DATABASE"], timeout=10)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys = ON")
+        connection = connect_database(
+            current_app.config["DATABASE_BACKEND"], current_app.config
+        )
         g.database = connection
     return g.database
 
@@ -184,18 +471,21 @@ def register():
     if not isinstance(password, str) or len(password) < 10 or len(password) > 128:
         return error("Passwords must be between 10 and 128 characters.")
     try:
-        cursor = database().execute(
+        database().execute(
             "INSERT INTO users(username, password_hash) VALUES (?, ?)",
             (username, generate_password_hash(password)),
         )
         database().commit()
-    except sqlite3.IntegrityError:
+    except DatabaseIntegrityError:
         return error("That username is already taken.", 409)
-    session.clear()
-    session["user_id"] = cursor.lastrowid
     user = database().execute(
-        "SELECT id, username, rating FROM users WHERE id = ?", (cursor.lastrowid,)
+        "SELECT id, username, rating FROM users WHERE username = ? COLLATE NOCASE",
+        (username,),
     ).fetchone()
+    if user is None:
+        raise RuntimeError("The newly created account could not be loaded.")
+    session.clear()
+    session["user_id"] = user["id"]
     return jsonify(user=user_json(user)), 201
 
 
@@ -317,7 +607,7 @@ def send_friend_request():
             (user["id"], target["id"]),
         )
         database().commit()
-    except sqlite3.IntegrityError:
+    except DatabaseIntegrityError:
         return error("A friend request is already waiting.", 409)
     return jsonify(status="sent", friend=user_json(target)), 201
 
@@ -376,8 +666,11 @@ def create_room():
     code = new_room_code()
     database().execute(
         """
-        INSERT INTO games(room_code, white_user_id, white_guest_id, status)
-        VALUES (?, ?, ?, 'waiting')
+        INSERT INTO games(
+            room_code, white_user_id, white_guest_id,
+            moves_json, grades_json, status
+        )
+        VALUES (?, ?, ?, '[]', '[]', 'waiting')
         """,
         (code, user["id"] if user else None, visitor_id),
     )
@@ -396,8 +689,11 @@ def invite_friend():
     code = new_room_code()
     database().execute(
         """
-        INSERT INTO games(room_code, white_user_id, invited_user_id, status)
-        VALUES (?, ?, ?, 'waiting')
+        INSERT INTO games(
+            room_code, white_user_id, invited_user_id,
+            moves_json, grades_json, status
+        )
+        VALUES (?, ?, ?, '[]', '[]', 'waiting')
         """,
         (code, user["id"], friend_id),
     )
@@ -405,20 +701,22 @@ def invite_friend():
     return jsonify(roomCode=code), 201
 
 
-def load_room(code: str) -> sqlite3.Row | None:
+def load_room(code: str, for_update: bool = False) -> sqlite3.Row | None:
     if not ROOM_CODE.fullmatch(code):
         return None
-    return database().execute(
-        """
+    statement = """
         SELECT g.*, white.username AS white_name, black.username AS black_name,
             white.rating AS white_rating, black.rating AS black_rating
         FROM games g
         LEFT JOIN users white ON white.id = g.white_user_id
         LEFT JOIN users black ON black.id = g.black_user_id
         WHERE g.room_code = ?
-        """,
-        (code,),
-    ).fetchone()
+        """
+    if for_update and current_app.config["DATABASE_BACKEND"] == "postgres":
+        statement += " FOR UPDATE OF g"
+    elif for_update and current_app.config["DATABASE_BACKEND"] == "mysql":
+        statement += " FOR UPDATE"
+    return database().execute(statement, (code,)).fetchone()
 
 
 def room_side(room: sqlite3.Row, user: sqlite3.Row | None, visitor_id: str) -> str | None:
@@ -716,7 +1014,7 @@ def join_room(code: str):
         return error("This room is an invitation for another player.", 403)
     connection = database()
     connection.execute("BEGIN IMMEDIATE")
-    fresh = load_room(code.upper())
+    fresh = load_room(code.upper(), for_update=True)
     if fresh is None or fresh["status"] != "waiting":
         connection.rollback()
         return error("This room is no longer waiting for a player.", 409)
@@ -754,7 +1052,7 @@ def make_move(code: str):
         return error("Provide valid from/to squares and an optional q, r, b, or n promotion.")
     connection = database()
     connection.execute("BEGIN IMMEDIATE")
-    room = load_room(code.upper())
+    room = load_room(code.upper(), for_update=True)
     side = room_side(room, current_user(), guest_id())
     if side is None:
         connection.rollback()
@@ -809,7 +1107,7 @@ def forfeit(code: str):
         return failure
     connection = database()
     connection.execute("BEGIN IMMEDIATE")
-    room = load_room(code.upper())
+    room = load_room(code.upper(), for_update=True)
     side = room_side(room, current_user(), guest_id())
     if side is None:
         connection.rollback()
@@ -832,9 +1130,17 @@ def restart_game(code: str):
     room, side, failure = authorized_room(code)
     if failure:
         return failure
+    connection = database()
+    connection.execute("BEGIN IMMEDIATE")
+    room = load_room(code.upper(), for_update=True)
+    side = room_side(room, current_user(), guest_id())
+    if side is None:
+        connection.rollback()
+        return error("You are not a player in this room.", 403)
     if room["status"] != "completed":
+        connection.rollback()
         return error("A new game can start after this match ends.", 409)
-    database().execute(
+    connection.execute(
         """
         UPDATE games SET moves_json = '[]', grades_json = '[]', rating_changes_json = NULL, result = NULL,
             status = CASE WHEN black_user_id IS NOT NULL OR black_guest_id IS NOT NULL
@@ -843,7 +1149,7 @@ def restart_game(code: str):
         """,
         (room["id"],),
     )
-    database().commit()
+    connection.commit()
     return jsonify(room_snapshot(load_room(code.upper()), side))
 
 
@@ -851,6 +1157,7 @@ app = create_app()
 
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", "20202"))
-    host = os.environ.get("CHESS_HOST", "127.0.0.1")
+    production = os.environ.get("CHESS_ENV", "").lower() == "production"
+    port = int(os.environ.get("PORT", "80" if production else "20202"))
+    host = os.environ.get("CHESS_HOST", "0.0.0.0" if production else "127.0.0.1")
     app.run(host=host, port=port, threaded=True)
