@@ -9,7 +9,7 @@
   font-family: "Segoe UI", Arial, sans-serif;
 }
 * { box-sizing: border-box; }
-body { min-width: 320px; min-height: 100vh; margin: 0; color: var(--text); background-color: var(--ink); background-image: radial-gradient(ellipse at 15% 15%, #34483b44, transparent 34%), radial-gradient(ellipse at 90% 70%, #76533133, transparent 38%), repeating-linear-gradient(45deg, transparent 0 42px, #ffffff06 43px 44px); }
+body { min-width: 320px; min-height: 100vh; margin: 0; color: var(--text); background-color: var(--ink); background-image: radial-gradient(ellipse at 15% 15%, #758a7133, transparent 34%), radial-gradient(ellipse at 90% 70%, #a6503d1f, transparent 38%), repeating-linear-gradient(45deg, transparent 0 42px, #61594d12 43px 44px); }
 button, input, textarea, select { font: inherit; }
 .lobby-shell { width: min(920px, calc(100% - 40px)); margin: 0 auto; }
 .lobby-header { height: 76px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--edge); }
