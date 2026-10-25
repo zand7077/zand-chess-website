@@ -265,6 +265,7 @@ def initialize_database(backend: str, config: dict[str, Any]) -> None:
                     clock_started_at INTEGER,
                     white_last_seen_at INTEGER,
                     black_last_seen_at INTEGER,
+                    rematch_requested_by TEXT,
                     result TEXT,
                     status TEXT NOT NULL CHECK(status IN ('waiting', 'active', 'completed')),
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -293,6 +294,7 @@ def initialize_database(backend: str, config: dict[str, Any]) -> None:
                 "clock_started_at": "INTEGER",
                 "white_last_seen_at": "INTEGER",
                 "black_last_seen_at": "INTEGER",
+                "rematch_requested_by": "TEXT",
             }
             for name, definition in column_types.items():
                 if name not in game_columns:
@@ -353,6 +355,7 @@ def initialize_database(backend: str, config: dict[str, Any]) -> None:
                 clock_started_at BIGINT,
                 white_last_seen_at BIGINT,
                 black_last_seen_at BIGINT,
+                rematch_requested_by VARCHAR(1),
                 result VARCHAR(255),
                 status VARCHAR(16) NOT NULL CHECK(status IN ('waiting', 'active', 'completed')),
                 created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -363,6 +366,7 @@ def initialize_database(backend: str, config: dict[str, Any]) -> None:
             "ALTER TABLE games ADD COLUMN IF NOT EXISTS rating_changes_json TEXT",
             "ALTER TABLE games ADD COLUMN IF NOT EXISTS white_last_seen_at BIGINT",
             "ALTER TABLE games ADD COLUMN IF NOT EXISTS black_last_seen_at BIGINT",
+            "ALTER TABLE games ADD COLUMN IF NOT EXISTS rematch_requested_by VARCHAR(1)",
         )
         try:
             for statement in schema:
@@ -423,6 +427,7 @@ def initialize_database(backend: str, config: dict[str, Any]) -> None:
             clock_started_at BIGINT,
             white_last_seen_at BIGINT,
             black_last_seen_at BIGINT,
+            rematch_requested_by VARCHAR(1),
             result VARCHAR(255),
             status VARCHAR(16) NOT NULL,
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -454,6 +459,7 @@ def initialize_database(backend: str, config: dict[str, Any]) -> None:
             "clock_started_at": "BIGINT",
             "white_last_seen_at": "BIGINT",
             "black_last_seen_at": "BIGINT",
+            "rematch_requested_by": "VARCHAR(1)",
         }
         for name, definition in column_types.items():
             if name not in columns:
@@ -1114,6 +1120,7 @@ def room_snapshot(room: sqlite3.Row, side: str) -> dict[str, Any]:
         "whiteTimeMs": white_time_ms,
         "blackTimeMs": black_time_ms,
         "clockStartedAt": room["clock_started_at"],
+        "rematchRequestedBy": room["rematch_requested_by"],
         "roomCode": room["room_code"],
         "playerSide": side,
         "whiteName": room["white_name"] or "Guest",
@@ -1445,7 +1452,7 @@ def forfeit(code: str):
 
 
 @bp.post("/api/rooms/<code>/new-game")
-def restart_game(code: str):
+def request_new_game(code: str):
     room, side, failure = authorized_room(code)
     if failure:
         return failure
@@ -1459,15 +1466,60 @@ def restart_game(code: str):
     if room["status"] != "completed":
         connection.rollback()
         return error("A new game can start after this match ends.", 409)
+    if room["rematch_requested_by"] == side:
+        connection.commit()
+        return jsonify(room_snapshot(room, side))
+    if room["rematch_requested_by"] is not None:
+        connection.rollback()
+        return error("Your opponent has already requested a rematch.", 409)
+    seen_column = "white_last_seen_at" if side == "w" else "black_last_seen_at"
+    connection.execute(
+        f"UPDATE games SET rematch_requested_by = ?, {seen_column} = ? WHERE id = ?",
+        (side, int(time.time() * 1000), room["id"]),
+    )
+    connection.commit()
+    return jsonify(room_snapshot(load_room(code.upper()), side))
+
+
+@bp.post("/api/rooms/<code>/new-game/respond")
+def respond_to_new_game(code: str):
+    room, side, failure = authorized_room(code)
+    if failure:
+        return failure
+    accept = json_body().get("accept")
+    if not isinstance(accept, bool):
+        return error("Choose whether to accept the rematch.")
+    connection = database()
+    connection.execute("BEGIN IMMEDIATE")
+    room = load_room(code.upper(), for_update=True)
+    side = room_side(room, current_user(), guest_id())
+    if side is None:
+        connection.rollback()
+        return error("You are not a player in this room.", 403)
+    requester = room["rematch_requested_by"]
+    if room["status"] != "completed" or requester is None:
+        connection.rollback()
+        return error("There is no rematch request to respond to.", 409)
+    if accept and requester == side:
+        connection.rollback()
+        return error("The player who requested the rematch cannot accept it.", 409)
+    if not accept:
+        connection.execute(
+            "UPDATE games SET rematch_requested_by = NULL WHERE id = ?",
+            (room["id"],),
+        )
+        connection.commit()
+        return jsonify(room_snapshot(load_room(code.upper()), side))
+
     clock = TIME_CONTROLS.get(room["time_control"], TIME_CONTROLS["rapid_10_0"])
     starting_ms = int(clock["seconds"]) * 1000
+    now_ms = int(time.time() * 1000)
     seen_column = "white_last_seen_at" if side == "w" else "black_last_seen_at"
     connection.execute(
         """
-        UPDATE games SET moves_json = '[]', grades_json = '[]', rating_changes_json = NULL, result = NULL,
-            status = CASE WHEN black_user_id IS NOT NULL OR black_guest_id IS NOT NULL
-                          THEN 'active' ELSE 'waiting' END,
-            white_time_ms = ?, black_time_ms = ?,
+        UPDATE games SET moves_json = '[]', grades_json = '[]',
+            rating_changes_json = NULL, result = NULL, rematch_requested_by = NULL,
+            status = 'active', white_time_ms = ?, black_time_ms = ?,
             clock_started_at = NULL
         WHERE id = ?
         """,
@@ -1475,9 +1527,9 @@ def restart_game(code: str):
     )
     connection.execute(
         f"UPDATE games SET {seen_column} = ? WHERE id = ?",
-        (int(time.time() * 1000), room["id"]),
+        (now_ms, room["id"]),
     )
-    synchronize_room_clock(load_room(code.upper()), int(time.time() * 1000))
+    room = synchronize_room_clock(load_room(code.upper()), now_ms)
     connection.commit()
     return jsonify(room_snapshot(load_room(code.upper()), side))
 

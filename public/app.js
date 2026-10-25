@@ -149,14 +149,18 @@ function showGradePopup(move) {
   const card = document.createElement("div");
   card.className = "move-grade-popup-card";
   const icon = gradeIcon(move.grade, "move-grade-popup-icon");
+  const piece = document.createElement("span");
+  piece.className = `move-grade-piece ${move.color === "w" ? "white-piece" : "black-piece"}`;
+  piece.textContent = symbols[`${move.color}${move.piece}`] || "";
+  piece.setAttribute("aria-label", `${move.color === "w" ? "White" : "Black"} piece`);
   const grade = document.createElement("strong");
   grade.textContent = move.grade.toUpperCase();
   const san = document.createElement("span");
   san.textContent = move.san;
-  card.append(icon, grade, san);
+  card.append(icon, piece, grade, san);
   popup.append(card);
   document.body.append(popup);
-  state.gradePopupTimer = window.setTimeout(() => popup.remove(), 1900);
+  state.gradePopupTimer = window.setTimeout(() => popup.remove(), 1400);
 }
 
 function roomApiPath(action = "") {
@@ -439,9 +443,22 @@ function render() {
     state.game.status !== "waiting" || state.game.playerSide !== "w",
   );
   document.querySelector("#waiting-room-code").textContent = state.game.roomCode;
+  const rematchModal = document.querySelector("#rematch-modal");
+  const rematchRequestedBy = state.game.rematchRequestedBy;
+  const isRematchRequester = rematchRequestedBy === state.game.playerSide;
+  rematchModal.classList.toggle("hidden", !rematchRequestedBy);
+  document.querySelector("#rematch-title").textContent = isRematchRequester
+    ? "Rematch requested"
+    : "Your opponent wants a rematch";
+  document.querySelector("#rematch-subtitle").textContent = isRematchRequester
+    ? "Waiting for your opponent to accept. The clocks will stay paused."
+    : "Accept to start a new game with the same time control.";
+  document.querySelector("#accept-rematch").classList.toggle("hidden", isRematchRequester);
+  document.querySelector("#decline-rematch").textContent =
+    isRematchRequester ? "Cancel request" : "Decline";
   if (state.game.over && !state.modalShown) {
     state.modalShown = true;
-    window.setTimeout(() => openEloModal(state.game.result), 350);
+    openEloModal(state.game.result);
   }
 }
 
@@ -475,6 +492,7 @@ function animateCapture() {
 
 async function updateGame(next, animate = false) {
   const oldLastMove = state.game?.lastMove;
+  const previousGameOver = state.game?.over || false;
   const previousHistory = state.game?.history || [];
   const previousPly = state.game?.history.length || 0;
   const highlightedGrade = state.game
@@ -489,6 +507,7 @@ async function updateGame(next, animate = false) {
     state.flipped = next.playerSide === "b";
     state.orientationInitialized = true;
   }
+  if (previousGameOver && !next.over) state.modalShown = false;
   render();
   if (highlightedGrade) showGradePopup(highlightedGrade);
   if (animate && next.lastMove?.captured && next.lastMove !== oldLastMove) animateCapture();
@@ -596,16 +615,33 @@ async function newGame() {
   if (!state.game?.over) return;
   try {
     const next = await api(roomApiPath("/new-game"), { method: "POST", body: "{}" });
-    state.selected = null;
-    state.modalShown = false;
-    state.startedAt = Date.now();
-    state.animatedPly = 0;
-    state.gradeAnimationPlayedPly = 0;
     document.querySelector("#elo-modal").classList.add("hidden");
     await updateGame(next);
-    showToast(next.status === "active"
-      ? "New game started with the same players."
-      : "New game started. Waiting for an opponent.");
+    showToast("Rematch request sent.");
+  } catch (error) {
+    showToast(error.message);
+  }
+}
+
+async function respondToRematch(accept) {
+  try {
+    const next = await api(roomApiPath("/new-game/respond"), {
+      method: "POST",
+      body: JSON.stringify({ accept }),
+    });
+    if (accept) {
+      state.selected = null;
+      state.startedAt = Date.now();
+      state.animatedPly = 0;
+      state.gradeAnimationPlayedPly = 0;
+      document.querySelector("#elo-modal").classList.add("hidden");
+      showToast("Rematch accepted. The game is ready.");
+    } else {
+      showToast(next.rematchRequestedBy
+        ? "Rematch request cancelled."
+        : "Rematch declined.");
+    }
+    await updateGame(next);
   } catch (error) {
     showToast(error.message);
   }
@@ -655,6 +691,12 @@ function renderClocks() {
 }
 
 document.querySelector("#new-game").addEventListener("click", newGame);
+document.querySelector("#accept-rematch").addEventListener("click", () => {
+  void respondToRematch(true);
+});
+document.querySelector("#decline-rematch").addEventListener("click", () => {
+  void respondToRematch(false);
+});
 document.querySelector("#forfeit-game").addEventListener("click", forfeitGame);
 document.querySelector("#flip-board").addEventListener("click", () => {
   state.flipped = !state.flipped;
@@ -725,6 +767,8 @@ window.setInterval(async () => {
     if (next.history.length !== state.game.history.length ||
         next.status !== state.game.status || next.result !== state.game.result ||
         next.clockStartedAt !== state.game.clockStartedAt ||
+        next.rematchRequestedBy !== state.game.rematchRequestedBy ||
+        JSON.stringify(next.ratingChanges) !== JSON.stringify(state.game.ratingChanges) ||
         next.history.at(-1)?.grade !== state.game.history.at(-1)?.grade) {
       updateGame(next, next.history.length > state.game.history.length);
     } else {

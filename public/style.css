@@ -139,16 +139,24 @@ h1,h2,p { margin: 0; }
 .control-deck footer b { color: #4e5155; }.control-deck footer span { padding: 0 4px; color: var(--cyan); }
 .toast { position: fixed; z-index: 8; left: 50%; bottom: 28px; width: min(520px,calc(100% - 28px)); padding: 10px 16px; border: 1px solid #45474b; border-radius: 4px; color: #f5f2eb; background: #303237; box-shadow: 0 8px 22px #26231f30; font-size: 12px; text-align: center; overflow-wrap: anywhere; opacity: 0; transform: translate(-50%,12px); transition: .2s; pointer-events: none; }
 .toast.show { opacity: 1; transform: translate(-50%,0); }
-.move-grade-popup { position: fixed; z-index: 12; inset: 0; display: grid; place-items: center; padding: 20px; background: #17161470; pointer-events: none; animation: moveGradeBackdrop 1.9s ease both; }
-.move-grade-popup-card { display: grid; justify-items: center; gap: 8px; width: min(290px,100%); padding: 32px 28px 26px; border: 1px solid #d2cec4; border-radius: 14px; color: #292a2c; background: linear-gradient(145deg,#fffefa,#f1ece1); box-shadow: 0 20px 70px #0008,0 0 36px #ffffff20; animation: moveGradeCard 1.9s cubic-bezier(.16,.9,.25,1.15) both; }
-.move-grade-popup-icon { font-size: 48px; line-height: 1; }
-.move-grade-popup strong { font: 800 22px "DM Mono",monospace; letter-spacing: .12em; text-align: center; }
-.move-grade-popup-card>span:last-child { color: #77766f; font: 700 16px "DM Mono",monospace; }
-.move-grade-popup[data-grade="brilliant"] .move-grade-popup-card { border-color: #c2a15e; color: #765b3c; box-shadow: 0 20px 70px #0008,0 0 42px #c2a15e77; }
-.move-grade-popup[data-grade="excellent"] .move-grade-popup-card { border-color: #4d6687; color: #354e70; box-shadow: 0 20px 70px #0008,0 0 42px #4d668755; }
-.move-grade-popup[data-grade="blunder"] .move-grade-popup-card { border-color: #dfb8b0; color: #913b36; box-shadow: 0 20px 70px #0008,0 0 42px #df726455; }
-.move-grade-popup[data-grade="grave-error"] .move-grade-popup-card { border-color: #752c2a; color: #752c2a; box-shadow: 0 20px 70px #0008,0 0 42px #a8433d77; }
-.modal { position: fixed; z-index: 10; inset: 0; display: grid; place-items: center; padding: 20px; background: rgba(36,34,31,.62); }
+.move-grade-popup { position: fixed; z-index: 12; inset: 0; display: grid; place-items: center; padding: 20px; pointer-events: none; }
+.move-grade-popup::before { position: absolute; width: min(82vw,440px); aspect-ratio: 1.5; border-radius: 50%; background: radial-gradient(ellipse,#a6503d38 0,transparent 70%); content: ""; animation: moveGradeGlow 1.35s ease both; }
+.move-grade-popup-card { position: relative; display: grid; justify-items: center; gap: 5px; width: min(340px,100%); padding: 10px 18px; color: #292a2c; background: transparent; text-shadow: 0 2px 14px #fffefa,0 0 28px #fffefa; animation: moveGradeCard 1.35s cubic-bezier(.16,.9,.25,1.15) both; }
+.move-grade-popup-icon { font-size: 34px; line-height: 1; }
+.move-grade-piece { font: 82px/.9 "Segoe UI Symbol",serif; filter: drop-shadow(0 7px 16px #292a2c44); }
+.move-grade-piece.white-piece { color: #fffefa; -webkit-text-stroke: 1px #676862; }
+.move-grade-piece.black-piece { color: #292a2c; -webkit-text-stroke: 1px #fffefa; }
+.move-grade-popup strong { font: 800 24px "DM Mono",monospace; letter-spacing: .12em; text-align: center; }
+.move-grade-popup-card>span:last-child { color: #77766f; font: 700 15px "DM Mono",monospace; }
+.move-grade-popup[data-grade="brilliant"]::before { background: radial-gradient(ellipse,#c2a15e66 0,transparent 70%); }
+.move-grade-popup[data-grade="brilliant"] .move-grade-popup-icon,.move-grade-popup[data-grade="brilliant"] strong { color: #765b3c; }
+.move-grade-popup[data-grade="excellent"]::before { background: radial-gradient(ellipse,#4d668755 0,transparent 70%); }
+.move-grade-popup[data-grade="excellent"] .move-grade-popup-icon,.move-grade-popup[data-grade="excellent"] strong { color: #354e70; }
+.move-grade-popup[data-grade="blunder"]::before { background: radial-gradient(ellipse,#df726455 0,transparent 70%); }
+.move-grade-popup[data-grade="blunder"] .move-grade-popup-icon,.move-grade-popup[data-grade="blunder"] strong { color: #913b36; }
+.move-grade-popup[data-grade="grave-error"]::before { background: radial-gradient(ellipse,#a8433d77 0,transparent 70%); }
+.move-grade-popup[data-grade="grave-error"] .move-grade-popup-icon,.move-grade-popup[data-grade="grave-error"] strong { color: #752c2a; }
+.modal { position: fixed; z-index: 20; inset: 0; display: grid; place-items: center; padding: 20px; background: rgba(36,34,31,.62); }
 .modal-card { position: relative; width: min(420px,100%); padding: 30px; border: 1px solid var(--panel-edge); border-radius: 6px; background: #f5f2eb; text-align: center; box-shadow: 0 18px 55px #17161440; animation: modalIn .22s ease-out; }
 .modal-close { position: absolute; top: 12px; right: 15px; border: 0; color: var(--muted); background: transparent; cursor: pointer; font-size: 24px; }
 .result-emblem { color: var(--gold); font-size: 42px; text-shadow: 0 0 24px #f7c87588; }
@@ -176,8 +184,8 @@ h1,h2,p { margin: 0; }
 @keyframes modalIn { from { opacity: 0; transform: translateY(12px) scale(.97); } to { opacity: 1; transform: none; } }
 @keyframes brilliantAura { from { box-shadow: 0 0 0 1px #c2a15e55,0 0 8px #bd9a4b33; } to { box-shadow: 0 0 0 1px #c2a15e88,0 0 16px #bd9a4b88; } }
 @keyframes gradeIconPop { 0% { opacity: 0; transform: translateY(8px) scale(.45) rotate(-24deg); } 55% { opacity: 1; transform: translateY(-2px) scale(1.45) rotate(8deg); } 78% { transform: translateY(0) scale(.92) rotate(-3deg); } 100% { opacity: 1; transform: none; } }
-@keyframes moveGradeBackdrop { 0%,100% { opacity: 0; } 12%,82% { opacity: 1; } }
-@keyframes moveGradeCard { 0% { opacity: 0; transform: translateY(34px) scale(.55) rotate(-5deg); } 14% { opacity: 1; transform: translateY(-7px) scale(1.08) rotate(1deg); } 22%,78% { opacity: 1; transform: translateY(0) scale(1) rotate(0); } 100% { opacity: 0; transform: translateY(-30px) scale(.92); } }
+@keyframes moveGradeGlow { 0% { opacity: 0; transform: scale(.55); } 18%,78% { opacity: 1; transform: scale(1); } 100% { opacity: 0; transform: scale(1.2); } }
+@keyframes moveGradeCard { 0% { opacity: 0; transform: translateY(34px) scale(.55) rotate(-5deg); } 14% { opacity: 1; transform: translateY(-7px) scale(1.08) rotate(1deg); } 22%,72% { opacity: 1; transform: translateY(0) scale(1) rotate(0); } 100% { opacity: 0; transform: translateY(-30px) scale(.92); } }
 @media (max-width: 900px) {
   .app-shell { width: min(720px,100% - 32px); }
   .arena { grid-template-columns: minmax(0,1fr) 285px; gap: 18px; }

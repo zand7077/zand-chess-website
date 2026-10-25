@@ -38,7 +38,8 @@ increments. Clocks start once both players have opened the game and pause when
 either leaves; a short heartbeat grace period covers temporary connection
 interruptions. Each player's clock is enforced by the server; a player who runs
 out of time loses. Boards stay oriented from each player's perspective instead
-of flipping every turn.
+of flipping every turn. Either player can request a rematch after a game; the
+new game begins only when the other player accepts.
 
 Move grades and position evaluations use the Stockfish 19 Lite single-threaded
 WebAssembly engine in the browser. The engine assets are served from `public/`,
