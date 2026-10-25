@@ -10,7 +10,7 @@
 }
 * { box-sizing: border-box; }
 body { min-width: 320px; min-height: 100vh; margin: 0; color: var(--text); background: var(--ink); }
-button, input { font: inherit; }
+button, input, textarea { font: inherit; }
 .lobby-shell { width: min(920px, calc(100% - 40px)); margin: 0 auto; }
 .lobby-header { height: 76px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--edge); }
 .brand { display: flex; gap: 10px; align-items: center; color: inherit; text-decoration: none; }
@@ -38,8 +38,8 @@ input:focus { outline: 2px solid #a6503d66; border-color: var(--accent); }
 .text-button { display: block; margin: 13px auto 0; border: 0; padding: 4px; color: var(--accent); background: transparent; cursor: pointer; font-size: 12px; }
 .play-panel { margin: 24px 0; padding: 20px; }
 .invite-share { display: grid; gap: 8px; width: min(100%, 560px); margin: 0 auto 18px; padding: 16px; border: 1px solid var(--edge); border-radius: 6px; background: var(--panel); }
-.invite-share .join-row { min-width: 0; }
-.invite-share input { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.invite-share .join-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; min-width: 0; }
+.invite-share textarea { display: block; width: 100%; min-width: 0; max-width: 100%; resize: vertical; overflow-wrap: anywhere; word-break: break-all; font-size: clamp(9px, 2.5vw, 12px); line-height: 1.4; }
 .invite-share .hint { margin: 0; }
 .quick-play { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: end; }
 .join-row { display: flex; gap: 8px; }
@@ -65,4 +65,5 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outlin
   .account-panel { grid-template-columns: 1fr; gap: 20px; padding: 30px 0 24px; }
   .account-card { max-width: none; }
   .quick-play, .dashboard-grid { grid-template-columns: 1fr; }
+  .invite-share .join-row { grid-template-columns: minmax(0, 1fr); }
 }

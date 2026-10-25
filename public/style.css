@@ -139,6 +139,11 @@ h1,h2,p { margin: 0; }
 .result-emblem { color: var(--gold); font-size: 42px; text-shadow: 0 0 24px #f7c87588; }
 .modal-card h2 { margin-top: 7px; font-size: 23px; }
 .modal-subtitle { margin: 6px 0 22px; color: var(--muted); font-size: 11px; }
+.waiting-card { width: min(440px,100%); }
+.waiting-card .eyebrow span { color: var(--text); }
+.waiting-home { display: inline-flex; justify-content: center; text-decoration: none; }
+.invitation-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.invitation-actions .action-button { display: flex; justify-content: center; align-items: center; min-height: 42px; margin: 0; text-decoration: none; }
 .rating-inputs { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; text-align: left; }
 .rating-inputs label { display: grid; gap: 7px; color: var(--muted); font: 8px "DM Mono",monospace; }
 .rating-inputs input { width: 100%; padding: 10px; border: 1px solid var(--panel-edge); border-radius: 4px; outline: none; color: var(--text); background: #fffdf8; font: 13px "DM Mono",monospace; }

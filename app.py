@@ -1032,6 +1032,21 @@ def join_room(code: str):
 
 @bp.get("/api/rooms/<code>")
 def get_room_state(code: str):
+    room = load_room(code.upper())
+    if room is None:
+        return error("That room could not be found.", 404)
+    user = current_user()
+    if (
+        room["status"] == "waiting"
+        and room["invited_user_id"] is not None
+        and user is not None
+        and user["id"] == room["invited_user_id"]
+        and room["black_user_id"] is None
+        and room["black_guest_id"] is None
+    ):
+        snapshot = room_snapshot(room, "b")
+        snapshot["requiresAcceptance"] = True
+        return jsonify(snapshot)
     room, side, failure = authorized_room(code)
     if failure:
         return failure

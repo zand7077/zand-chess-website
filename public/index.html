@@ -77,6 +77,25 @@
   </main>
 
   <div id="toast" class="toast" role="status"></div>
+  <div id="waiting-modal" class="modal hidden" role="status" aria-live="polite">
+    <div class="modal-card waiting-card">
+      <span class="eyebrow">ROOM <span id="waiting-room-code"></span></span>
+      <h2>Waiting for player</h2>
+      <p class="modal-subtitle">Your game will start when your opponent accepts the invitation and joins.</p>
+      <a class="action-button secondary waiting-home" href="/">Back to lobby</a>
+    </div>
+  </div>
+  <div id="invitation-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="invitation-title">
+    <div class="modal-card waiting-card">
+      <span class="eyebrow">CHESS INVITATION</span>
+      <h2 id="invitation-title">You have been invited to play</h2>
+      <p class="modal-subtitle">Accept the invitation to join the game. The match will not start until you accept.</p>
+      <div class="invitation-actions">
+        <button id="accept-invitation" class="action-button primary" type="button">Accept invitation</button>
+        <a class="action-button secondary" href="/">Not now</a>
+      </div>
+    </div>
+  </div>
   <div id="elo-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="result-title">
     <div class="modal-card">
       <button class="modal-close" id="close-modal" aria-label="Close">×</button>

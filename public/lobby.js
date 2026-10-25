@@ -107,8 +107,13 @@ async function loadDashboard() {
     invitations.replaceChildren();
     if (!data.invitations.length) invitations.innerHTML = '<p class="muted">No invitations waiting.</p>';
     for (const invite of data.invitations) {
-      item(invitations, `${invite.inviter} invited you`, "Accept", () => {
-        window.location.href = `/play?room=${encodeURIComponent(invite.room_code)}`;
+      item(invitations, `${invite.inviter} invited you`, "Accept", async () => {
+        try {
+          await api(`/api/rooms/${encodeURIComponent(invite.room_code)}/join`, {
+            method: "POST", body: "{}",
+          });
+          window.location.href = `/play?room=${encodeURIComponent(invite.room_code)}`;
+        } catch (error) { tell(error.message); }
       }, true);
     }
 

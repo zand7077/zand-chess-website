@@ -58,7 +58,11 @@ async function api(path, options = {}) {
     headers: { "Content-Type": "application/json", ...options.headers },
   });
   const result = await response.json();
-  if (!response.ok) throw new Error(result.error || "The request failed.");
+  if (!response.ok) {
+    const error = new Error(result.error || "The request failed.");
+    error.status = response.status;
+    throw error;
+  }
   return result;
 }
 
@@ -299,6 +303,12 @@ function render() {
   document.querySelector("#forfeit-game").disabled =
     state.game.over || state.game.status !== "active" || state.busy;
   document.querySelector("#new-game").disabled = !state.game.over || state.busy;
+  const waitingModal = document.querySelector("#waiting-modal");
+  waitingModal.classList.toggle(
+    "hidden",
+    state.game.status !== "waiting" || state.game.playerSide !== "w",
+  );
+  document.querySelector("#waiting-room-code").textContent = state.game.roomCode;
   if (state.game.over && !state.modalShown) {
     state.modalShown = true;
     window.setTimeout(() => openEloModal(state.game.result), 350);
@@ -500,6 +510,34 @@ document.querySelector("#share-room").addEventListener("click", async () => {
 document.querySelector("#close-modal").addEventListener("click", () => {
   document.querySelector("#elo-modal").classList.add("hidden");
 });
+
+function confirmInvitation() {
+  const modal = document.querySelector("#invitation-modal");
+  modal.classList.remove("hidden");
+  return new Promise((resolve) => {
+    document.querySelector("#accept-invitation").addEventListener("click", () => {
+      modal.classList.add("hidden");
+      resolve(true);
+    }, { once: true });
+  });
+}
+
+async function loadInitialGame() {
+  let initial;
+  try {
+    initial = await api(roomApiPath());
+  } catch (error) {
+    if (error.status !== 403) throw error;
+    initial = await api(roomApiPath("/join"), { method: "POST", body: "{}" });
+  }
+  if (initial.requiresAcceptance) {
+    if (!await confirmInvitation()) return;
+    initial = await api(roomApiPath("/join"), { method: "POST", body: "{}" });
+  }
+  state.startedAt = Date.now();
+  await updateGame(initial);
+}
+
 document.querySelector("#elo-modal").addEventListener("click", (event) => {
   if (event.target.id === "elo-modal") event.currentTarget.classList.add("hidden");
 });
@@ -507,11 +545,7 @@ makeBoard();
 if (!state.roomCode) {
   window.location.replace("/");
 } else {
-  api(roomApiPath("/join"), { method: "POST", body: "{}" })
-    .then((initial) => {
-      state.startedAt = Date.now();
-      updateGame(initial);
-    })
+  loadInitialGame()
     .catch((error) => {
       showToast(error.message);
       window.setTimeout(() => window.location.replace("/"), 1800);
