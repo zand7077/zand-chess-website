@@ -26,6 +26,10 @@ the friends list, or create a room and share its link. The other player can
 join without registering. Local accounts and game rooms are saved to
 `chess.sqlite3`.
 
+The lobby displays the top 10 accounts by Elo. Select a player to view their
+rating, account age, match record, and recent completed games, or send a friend
+request.
+
 Usernames must be 3–20 letters, numbers, or underscores. Passwords must be at
 least 10 characters. Friend requests must be accepted before either player can
 send a friend invitation. New accounts start at 800 Elo. For games between two

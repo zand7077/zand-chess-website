@@ -537,6 +537,79 @@ def session_info():
     return jsonify(user=user_json(current_user()))
 
 
+@bp.get("/api/leaderboard")
+def leaderboard():
+    leaders = database().execute(
+        """
+        SELECT id, username, rating FROM users
+        ORDER BY rating DESC, LOWER(username) ASC, id ASC
+        LIMIT 10
+        """
+    ).fetchall()
+    return jsonify(leaders=[user_json(user) for user in leaders])
+
+
+@bp.get("/api/users/<int:user_id>/profile")
+def user_profile(user_id: int):
+    profile = database().execute(
+        "SELECT id, username, rating, created_at FROM users WHERE id = ?",
+        (user_id,),
+    ).fetchone()
+    if profile is None:
+        return error("That account could not be found.", 404)
+
+    games = database().execute(
+        """
+        SELECT g.result, g.created_at,
+            CASE WHEN g.white_user_id = ? THEN 'white' ELSE 'black' END AS side,
+            CASE WHEN g.white_user_id = ? THEN black.username ELSE white.username END AS opponent,
+            g.rating_changes_json
+        FROM games g
+        LEFT JOIN users white ON white.id = g.white_user_id
+        LEFT JOIN users black ON black.id = g.black_user_id
+        WHERE (g.white_user_id = ? OR g.black_user_id = ?)
+            AND g.status = 'completed' AND g.result IS NOT NULL
+        ORDER BY g.created_at DESC, g.id DESC
+        """,
+        (user_id, user_id, user_id, user_id),
+    ).fetchall()
+
+    record = {"wins": 0, "draws": 0, "losses": 0}
+    recent_games = []
+    for game in games:
+        won = game["result"].startswith(
+            "White wins" if game["side"] == "white" else "Black wins"
+        )
+        drawn = game["result"].startswith("Draw")
+        outcome = "win" if won else "draw" if drawn else "loss"
+        record[{"win": "wins", "draw": "draws", "loss": "losses"}[outcome]] += 1
+        if len(recent_games) < 10:
+            rating_change = None
+            if game["rating_changes_json"]:
+                changes = json.loads(game["rating_changes_json"])
+                side_change = changes.get(game["side"])
+                if side_change:
+                    rating_change = side_change.get("change")
+            recent_games.append({
+                "outcome": outcome,
+                "result": game["result"],
+                "opponent": game["opponent"] or "Guest",
+                "playedAt": str(game["created_at"]),
+                "ratingChange": rating_change,
+            })
+
+    return jsonify(
+        profile={
+            "id": profile["id"],
+            "username": profile["username"],
+            "rating": profile["rating"],
+            "memberSince": str(profile["created_at"]),
+            "record": record,
+            "recentGames": recent_games,
+        }
+    )
+
+
 @bp.post("/api/register")
 def register():
     body = json_body()

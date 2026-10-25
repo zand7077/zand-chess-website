@@ -41,6 +41,135 @@ function item(container, label, actionLabel, action, primary = false) {
   container.append(row);
 }
 
+function leaderboardEntry(container, leader) {
+  const row = document.createElement("div");
+  row.className = "leaderboard-entry";
+  const summary = document.createElement("button");
+  summary.type = "button";
+  summary.className = "leaderboard-summary";
+  const rank = document.createElement("span");
+  rank.className = "leaderboard-rank";
+  rank.textContent = String(leader.rank).padStart(2, "0");
+  const identity = document.createElement("span");
+  identity.className = "leaderboard-identity";
+  const name = document.createElement("strong");
+  name.textContent = leader.username;
+  const hint = document.createElement("small");
+  hint.textContent = "View player options";
+  identity.append(name, hint);
+  const rating = document.createElement("strong");
+  rating.className = "leaderboard-rating";
+  rating.textContent = `${leader.rating} ELO`;
+  summary.append(rank, identity, rating);
+
+  const actions = document.createElement("div");
+  actions.className = "leaderboard-actions hidden";
+  const profileButton = button("View profile", () => {
+    openPlayerProfile(leader.id).catch((error) => tell(error.message));
+  });
+  const friendButton = button("Send friend request", async () => {
+    try {
+      await api("/api/friends/requests", {
+        method: "POST",
+        body: JSON.stringify({ username: leader.username }),
+      });
+      tell(`Friend request sent to ${leader.username}.`);
+      await loadDashboard();
+    } catch (error) {
+      tell(error.message);
+    }
+  }, true);
+  if (signedInUser?.id === leader.id) {
+    friendButton.disabled = true;
+    friendButton.title = "This is your account.";
+  }
+  actions.append(profileButton, friendButton);
+  summary.addEventListener("click", () => {
+    const isOpen = !actions.classList.contains("hidden");
+    for (const menu of container.querySelectorAll(".leaderboard-actions")) {
+      menu.classList.add("hidden");
+    }
+    actions.classList.toggle("hidden", isOpen);
+    summary.setAttribute("aria-expanded", String(!isOpen));
+  });
+  summary.setAttribute("aria-expanded", "false");
+  row.append(summary, actions);
+  container.append(row);
+}
+
+async function loadLeaderboard() {
+  const container = document.querySelector("#leaderboard-list");
+  try {
+    const data = await api("/api/leaderboard");
+    container.replaceChildren();
+    if (!data.leaders.length) {
+      container.innerHTML = '<p class="muted">No accounts yet. Create an account to claim the first spot.</p>';
+      return;
+    }
+    data.leaders.forEach((leader, index) => {
+      leaderboardEntry(container, { ...leader, rank: index + 1 });
+    });
+  } catch (error) {
+    container.replaceChildren();
+    const status = document.createElement("p");
+    status.className = "muted";
+    status.textContent = error.message;
+    container.append(status);
+  }
+}
+
+function formatProfileDate(value) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? "Date unavailable"
+    : new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(date);
+}
+
+async function openPlayerProfile(userId) {
+  const { profile } = await api(`/api/users/${encodeURIComponent(userId)}/profile`);
+  document.querySelector("#profile-name").textContent = profile.username;
+  document.querySelector("#profile-member").textContent =
+    `Member since ${formatProfileDate(profile.memberSince)}`;
+  document.querySelector("#profile-rating").textContent = profile.rating;
+  document.querySelector("#profile-wins").textContent = profile.record.wins;
+  document.querySelector("#profile-draws").textContent = profile.record.draws;
+  document.querySelector("#profile-losses").textContent = profile.record.losses;
+
+  const games = document.querySelector("#profile-games");
+  games.replaceChildren();
+  if (!profile.recentGames.length) {
+    const empty = document.createElement("p");
+    empty.className = "muted";
+    empty.textContent = "No completed matches yet.";
+    games.append(empty);
+  }
+  for (const game of profile.recentGames) {
+    const row = document.createElement("div");
+    row.className = `profile-game ${game.outcome}`;
+    const outcome = document.createElement("strong");
+    outcome.className = "profile-outcome";
+    outcome.textContent = game.outcome.toUpperCase();
+    const detail = document.createElement("span");
+    detail.className = "profile-game-detail";
+    const opponent = document.createElement("strong");
+    opponent.textContent = `vs ${game.opponent}`;
+    const result = document.createElement("small");
+    result.textContent = `${game.result} · ${formatProfileDate(game.playedAt)}`;
+    detail.append(opponent, result);
+    const change = document.createElement("span");
+    change.className = "profile-rating-change";
+    if (game.ratingChange === null) {
+      change.textContent = "—";
+    } else {
+      change.textContent = `${game.ratingChange >= 0 ? "+" : ""}${game.ratingChange}`;
+      change.classList.add(game.ratingChange >= 0 ? "positive" : "negative");
+    }
+    row.append(outcome, detail, change);
+    games.append(row);
+  }
+  document.querySelector("#profile-modal").classList.remove("hidden");
+}
+
 function setAccountView(user) {
   signedInUser = user;
   const signedIn = Boolean(user);
@@ -56,6 +185,7 @@ function setAccountView(user) {
     clearInterval(dashboardTimer);
     dashboardTimer = null;
   }
+  loadLeaderboard();
 }
 
 async function loadDashboard() {
@@ -201,6 +331,18 @@ document.querySelector("#logout-button").addEventListener("click", async () => {
     setAccountView(null);
     tell("You have signed out.");
   } catch (error) { tell(error.message); }
+});
+
+function closeProfile() {
+  document.querySelector("#profile-modal").classList.add("hidden");
+}
+
+document.querySelector("#close-profile").addEventListener("click", closeProfile);
+document.querySelector("#profile-modal").addEventListener("click", (event) => {
+  if (event.target.id === "profile-modal") closeProfile();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") closeProfile();
 });
 
 document.querySelector("#create-room").addEventListener("click", async () => {
