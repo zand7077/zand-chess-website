@@ -124,7 +124,9 @@ async function loadDashboard() {
     games.replaceChildren();
     if (!data.games.length) games.innerHTML = '<p class="muted">No active games.</p>';
     for (const game of data.games) {
-      item(games, `${game.room_code} · ${game.status}`, "Open", () => {
+      const white = game.white_name || "Guest";
+      const black = game.black_name || (game.status === "waiting" ? "Waiting for player" : "Guest");
+      item(games, `${white} vs ${black}`, "Open", () => {
         window.location.href = `/play?room=${encodeURIComponent(game.room_code)}`;
       });
     }

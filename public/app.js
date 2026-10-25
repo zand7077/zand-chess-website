@@ -30,6 +30,7 @@ const state = {
   startedAt: Date.now(),
   modalShown: false,
   toastTimer: null,
+  gradePopupTimer: null,
   animatedPly: 0,
   gradeAnimationPlayedPly: 0,
 };
@@ -37,6 +38,7 @@ const squares = new Map();
 const gridSquares = new Map();
 const squareParts = new Map();
 const stockfish = new Worker("/engine/stockfish-19-lite-single.js");
+const gradePopupNames = new Set(["Brilliant", "Excellent", "Blunder", "Grave error"]);
 
 state.engineReady = new Promise((resolve, reject) => {
   const timeout = window.setTimeout(
@@ -134,6 +136,24 @@ function showToast(message) {
   toastElement.classList.add("show");
   clearTimeout(state.toastTimer);
   state.toastTimer = setTimeout(() => toastElement.classList.remove("show"), 2200);
+}
+
+function showGradePopup(move) {
+  document.querySelector(".move-grade-popup")?.remove();
+  clearTimeout(state.gradePopupTimer);
+  const popup = document.createElement("div");
+  popup.className = "move-grade-popup";
+  popup.dataset.grade = move.grade.toLowerCase().replaceAll(" ", "-");
+  popup.setAttribute("role", "status");
+  popup.setAttribute("aria-live", "polite");
+  const icon = gradeIcon(move.grade, "move-grade-popup-icon");
+  const grade = document.createElement("strong");
+  grade.textContent = move.grade.toUpperCase();
+  const san = document.createElement("span");
+  san.textContent = move.san;
+  popup.append(icon, grade, san);
+  document.body.append(popup);
+  state.gradePopupTimer = window.setTimeout(() => popup.remove(), 1900);
 }
 
 function roomApiPath(action = "") {
@@ -270,6 +290,16 @@ function historyMove(move, index) {
     wrapper.append(grade);
   }
   return wrapper;
+}
+
+function newlyHighlightedGrade(previousMoves, nextMoves) {
+  for (let index = nextMoves.length - 1; index >= 0; index -= 1) {
+    const move = nextMoves[index];
+    if (gradePopupNames.has(move.grade) && move.grade !== previousMoves[index]?.grade) {
+      return move;
+    }
+  }
+  return null;
 }
 
 function accuracy(moves) {
@@ -440,7 +470,11 @@ function animateCapture() {
 
 async function updateGame(next, animate = false) {
   const oldLastMove = state.game?.lastMove;
+  const previousHistory = state.game?.history || [];
   const previousPly = state.game?.history.length || 0;
+  const highlightedGrade = state.game
+    ? newlyHighlightedGrade(previousHistory, next.history)
+    : null;
   state.game = next;
   state.clockSyncAt = Date.now();
   if (animate && next.history.length > previousPly) {
@@ -451,6 +485,7 @@ async function updateGame(next, animate = false) {
     state.orientationInitialized = true;
   }
   render();
+  if (highlightedGrade) showGradePopup(highlightedGrade);
   if (animate && next.lastMove?.captured && next.lastMove !== oldLastMove) animateCapture();
 }
 

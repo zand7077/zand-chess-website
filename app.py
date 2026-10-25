@@ -608,9 +608,13 @@ def dashboard():
     ).fetchall()
     games = connection.execute(
         """
-        SELECT room_code, status, created_at FROM games
-        WHERE (white_user_id = ? OR black_user_id = ?) AND status != 'completed'
-        ORDER BY created_at DESC
+        SELECT g.room_code, g.status, g.created_at,
+            white.username AS white_name, black.username AS black_name
+        FROM games g
+        LEFT JOIN users white ON white.id = g.white_user_id
+        LEFT JOIN users black ON black.id = g.black_user_id
+        WHERE (g.white_user_id = ? OR g.black_user_id = ?) AND g.status != 'completed'
+        ORDER BY g.created_at DESC
         """,
         (user["id"], user["id"]),
     ).fetchall()
@@ -915,6 +919,25 @@ def result_for(board: chess.Board) -> str | None:
         return "Draw by the 50-move rule"
     winner = "White" if outcome.winner == chess.WHITE else "Black"
     return f"{winner} wins by checkmate"
+
+
+def is_brilliant_sacrifice(board: chess.Board, move: chess.Move) -> bool:
+    piece = board.piece_at(move.from_square)
+    if (
+        piece is None
+        or piece.piece_type == chess.PAWN
+        or board.is_capture(move)
+        or board.is_attacked_by(not piece.color, move.from_square)
+    ):
+        return False
+    after_move = board.copy()
+    after_move.push(move)
+    if after_move.is_check():
+        return False
+    return any(
+        reply.to_square == move.to_square and after_move.is_capture(reply)
+        for reply in after_move.legal_moves
+    )
 
 
 def elo_changes(
@@ -1235,7 +1258,13 @@ def submit_move_analysis(code: str):
     if "grade" in grades[ply - 1]:
         connection.commit()
         return jsonify(room_snapshot(fresh, fresh_side))
-    if centipawn_loss >= 500:
+    board_before = chess.Board()
+    for uci in moves[:ply - 1]:
+        board_before.push_uci(uci)
+    played_move = chess.Move.from_uci(moves[ply - 1])
+    if centipawn_loss <= 10 and is_brilliant_sacrifice(board_before, played_move):
+        grade = "Brilliant"
+    elif centipawn_loss >= 500:
         grade = "Grave error"
     elif centipawn_loss >= 300:
         grade = "Blunder"

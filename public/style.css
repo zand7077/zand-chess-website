@@ -111,7 +111,7 @@ h1,h2,p { margin: 0; }
 .grade-chip.great { color: #765b83; }
 .grade-chip.brilliant { color: #fff8e8; border-color: #92733b; background: #504534; box-shadow: 0 0 0 1px #c2a15e55,0 0 12px #bd9a4b55; letter-spacing: .08em; animation: brilliantAura 2.4s ease-in-out infinite alternate; }
 .grade-key { display: flex; flex-wrap: wrap; justify-content: flex-start; gap: 4px 8px; margin-top: 12px; color: #77766f; font: 6px "DM Mono",monospace; }
-.grade-key span:nth-child(1) { color: #765b3c; }.grade-key span:nth-child(2) { color: #354e70; }.grade-key span:nth-child(3) { color: #5c6878; }.grade-key span:nth-child(4) { color: #896633; }.grade-key span:nth-child(5) { color: #9e5335; }.grade-key span:nth-child(6) { color: #913b36; }.grade-key span:nth-child(7) { color: #752c2a; }
+.grade-key span:nth-child(1) { color: #765b3c; }.grade-key span:nth-child(2) { color: #354e70; }.grade-key span:nth-child(3) { color: #765b83; }.grade-key span:nth-child(4) { color: #4d6687; }.grade-key span:nth-child(5) { color: #5c6878; }.grade-key span:nth-child(6) { color: #896633; }.grade-key span:nth-child(7) { color: #9e5335; }.grade-key span:nth-child(8) { color: #913b36; }.grade-key span:nth-child(9) { color: #752c2a; }.grade-key span:nth-child(10) { color: #a8433d; }
 .move-total { color: var(--muted); font: 8px "DM Mono",monospace; }
 .history { min-height: 150px; display: flex; flex-direction: column; }
 .move-list { max-height: 174px; min-height: 67px; overflow: auto; margin-top: 9px; scrollbar-color: #aaa69d transparent; scrollbar-width: thin; }
@@ -139,6 +139,14 @@ h1,h2,p { margin: 0; }
 .control-deck footer b { color: #4e5155; }.control-deck footer span { padding: 0 4px; color: var(--cyan); }
 .toast { position: fixed; z-index: 8; left: 50%; bottom: 28px; width: min(520px,calc(100% - 28px)); padding: 10px 16px; border: 1px solid #45474b; border-radius: 4px; color: #f5f2eb; background: #303237; box-shadow: 0 8px 22px #26231f30; font-size: 12px; text-align: center; overflow-wrap: anywhere; opacity: 0; transform: translate(-50%,12px); transition: .2s; pointer-events: none; }
 .toast.show { opacity: 1; transform: translate(-50%,0); }
+.move-grade-popup { position: fixed; z-index: 12; top: 16vh; left: 50%; display: grid; justify-items: center; gap: 5px; min-width: 150px; padding: 18px 24px 15px; border: 1px solid #d2cec4; border-radius: 10px; color: #292a2c; background: #fffefaee; box-shadow: 0 12px 40px #17161445; pointer-events: none; animation: moveGradePopup 1.9s cubic-bezier(.16,.9,.25,1.15) both; }
+.move-grade-popup-icon { font-size: 28px; line-height: 1; }
+.move-grade-popup strong { font: 800 15px "DM Mono",monospace; letter-spacing: .12em; }
+.move-grade-popup>span:last-child { color: #77766f; font: 700 11px "DM Mono",monospace; }
+.move-grade-popup[data-grade="brilliant"] { border-color: #c2a15e; color: #765b3c; }
+.move-grade-popup[data-grade="excellent"] { border-color: #4d6687; color: #354e70; }
+.move-grade-popup[data-grade="blunder"] { border-color: #dfb8b0; color: #913b36; }
+.move-grade-popup[data-grade="grave-error"] { border-color: #752c2a; color: #752c2a; }
 .modal { position: fixed; z-index: 10; inset: 0; display: grid; place-items: center; padding: 20px; background: rgba(36,34,31,.62); }
 .modal-card { position: relative; width: min(420px,100%); padding: 30px; border: 1px solid var(--panel-edge); border-radius: 6px; background: #f5f2eb; text-align: center; box-shadow: 0 18px 55px #17161440; animation: modalIn .22s ease-out; }
 .modal-close { position: absolute; top: 12px; right: 15px; border: 0; color: var(--muted); background: transparent; cursor: pointer; font-size: 24px; }
@@ -167,6 +175,7 @@ h1,h2,p { margin: 0; }
 @keyframes modalIn { from { opacity: 0; transform: translateY(12px) scale(.97); } to { opacity: 1; transform: none; } }
 @keyframes brilliantAura { from { box-shadow: 0 0 0 1px #c2a15e55,0 0 8px #bd9a4b33; } to { box-shadow: 0 0 0 1px #c2a15e88,0 0 16px #bd9a4b88; } }
 @keyframes gradeIconPop { 0% { opacity: 0; transform: translateY(8px) scale(.45) rotate(-24deg); } 55% { opacity: 1; transform: translateY(-2px) scale(1.45) rotate(8deg); } 78% { transform: translateY(0) scale(.92) rotate(-3deg); } 100% { opacity: 1; transform: none; } }
+@keyframes moveGradePopup { 0% { opacity: 0; transform: translate(-50%,22px) scale(.55) rotate(-5deg); } 14% { opacity: 1; transform: translate(-50%,-5px) scale(1.08) rotate(1deg); } 22%,78% { opacity: 1; transform: translate(-50%,0) scale(1) rotate(0); } 100% { opacity: 0; transform: translate(-50%,-24px) scale(.92); } }
 @media (max-width: 900px) {
   .app-shell { width: min(720px,100% - 32px); }
   .arena { grid-template-columns: minmax(0,1fr) 285px; gap: 18px; }

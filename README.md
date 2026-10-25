@@ -41,10 +41,11 @@ of flipping every turn.
 Move grades and position evaluations use the Stockfish 19 Lite single-threaded
 WebAssembly engine in the browser. The engine assets are served from `public/`,
 so they do not require runtime downloads or a Stockfish process on the Wasmer
-server. First-use engine loading may take a moment, and analysis uses the
-player's device. Stockfish.js is GPL-3.0; its license and authors are in
-`public/engine/Copying.txt` and `public/engine/AUTHORS.txt`. The corresponding
-source is available at
+server. Near-best moves that offer an opponent a legal capture of a non-pawn
+piece are highlighted as Brilliant. First-use engine loading may take a moment,
+and analysis uses the player's device. Stockfish.js is GPL-3.0; its license
+and authors are in `public/engine/Copying.txt` and `public/engine/AUTHORS.txt`.
+The corresponding source is available at
 [Stockfish.js v19.0.1](https://github.com/nmrugg/stockfish.js/tree/v19.0.1).
 
 ## Host on the internet
