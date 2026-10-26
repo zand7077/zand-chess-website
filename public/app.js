@@ -40,58 +40,65 @@ const state = {
 const squares = new Map();
 const gridSquares = new Map();
 const squareParts = new Map();
-const stockfish = new Worker("/engine/stockfish-19-lite-single.js");
+let stockfish = null;
 const gradePopupNames = new Set([
   "Brilliant", "Excellent", "Blunder", "Grave error", "Missed win",
 ]);
 
-state.engineReady = new Promise((resolve, reject) => {
-  const timeout = window.setTimeout(
-    () => reject(new Error("Stockfish took too long to start.")),
-    15000,
-  );
-  stockfish.onerror = () => {
-    window.clearTimeout(timeout);
-    reject(new Error("The Stockfish analysis engine could not be loaded."));
-  };
-  stockfish.onmessage = (event) => {
-    const line = String(event.data);
-    if (line === "uciok") {
-      stockfish.postMessage("setoption name Threads value 1");
-      stockfish.postMessage("setoption name Hash value 16");
-      stockfish.postMessage("isready");
-    } else if (line === "readyok") {
+function initializeStockfish() {
+  if (state.engineReady) return state.engineReady;
+  state.engineReady = new Promise((resolve, reject) => {
+    const worker = new Worker("/engine/stockfish-19-lite-single.js");
+    stockfish = worker;
+    const timeout = window.setTimeout(() => {
+      worker.terminate();
+      reject(new Error("Stockfish took too long to start."));
+    }, 15000);
+    worker.onerror = () => {
       window.clearTimeout(timeout);
-      resolve();
-    }
-    const pending = state.enginePending;
-    if (!pending) return;
-    const score = line.match(/\bscore (cp|mate) (-?\d+)/);
-    if (score) {
-      const mate = score[1] === "mate" ? Number(score[2]) : null;
-      pending.score = {
-        value: mate === null ? Number(score[2]) : (mate > 0 ? 10000 : -10000),
-        mate,
-      };
-    }
-    if (line.startsWith("bestmove")) {
-      window.clearTimeout(pending.timeout);
-      state.enginePending = null;
-      if (pending.score === null) {
-        pending.reject(new Error("Stockfish did not return an evaluation."));
-      } else {
-        pending.resolve(pending.score);
+      worker.terminate();
+      reject(new Error("The Stockfish analysis engine could not be loaded."));
+    };
+    worker.onmessage = (event) => {
+      const line = String(event.data);
+      if (line === "uciok") {
+        worker.postMessage("setoption name Threads value 1");
+        worker.postMessage("setoption name Hash value 16");
+        worker.postMessage("isready");
+      } else if (line === "readyok") {
+        window.clearTimeout(timeout);
+        resolve();
       }
-    }
-  };
-  stockfish.postMessage("uci");
-});
+      const pending = state.enginePending;
+      if (!pending) return;
+      const score = line.match(/\bscore (cp|mate) (-?\d+)/);
+      if (score) {
+        const mate = score[1] === "mate" ? Number(score[2]) : null;
+        pending.score = {
+          value: mate === null ? Number(score[2]) : (mate > 0 ? 10000 : -10000),
+          mate,
+        };
+      }
+      if (line.startsWith("bestmove")) {
+        window.clearTimeout(pending.timeout);
+        state.enginePending = null;
+        if (pending.score === null) {
+          pending.reject(new Error("Stockfish did not return an evaluation."));
+        } else {
+          pending.resolve(pending.score);
+        }
+      }
+    };
+    worker.postMessage("uci");
+  });
+  return state.engineReady;
+}
 
 let engineQueue = Promise.resolve();
 
 function stockfishScore(fen) {
   const request = engineQueue.then(async () => {
-    await state.engineReady;
+    await initializeStockfish();
     return new Promise((resolve, reject) => {
       const pending = {
         score: null,
@@ -104,7 +111,7 @@ function stockfishScore(fen) {
       };
       state.enginePending = pending;
       stockfish.postMessage(`position fen ${fen}`);
-      stockfish.postMessage("go movetime 180");
+      stockfish.postMessage("go movetime 80");
     });
   });
   engineQueue = request.catch(() => {});
@@ -589,6 +596,24 @@ async function sendMove(from, to, promotion, isPremove = false) {
   }
 }
 
+function queuePremove(from, to) {
+  if (from === to) return false;
+  const fromCoords = squareCoords(from);
+  const toCoords = squareCoords(to);
+  const piece = state.game.board[fromCoords.row][fromCoords.col];
+  const target = state.game.board[toCoords.row][toCoords.col];
+  if (piece?.[0] !== state.game.playerSide || target?.[0] === state.game.playerSide) {
+    return false;
+  }
+  const promotionRank = state.game.playerSide === "w" ? "8" : "1";
+  const promotion = piece[1] === "p" && to[1] === promotionRank ? "q" : undefined;
+  state.premove = { from, to, promotion };
+  state.selected = null;
+  showToast("Premove queued. Click its piece to cancel, or choose another move.");
+  renderBoard();
+  return true;
+}
+
 async function onSquareClick(name) {
   if (state.isSpectator || !name || !state.game || state.game.over || state.busy) return;
   if (state.game.status !== "active") return;
@@ -609,16 +634,7 @@ async function onSquareClick(name) {
       return;
     }
     if (state.selected) {
-      const from = state.selected;
-      const fromCoords = squareCoords(from);
-      const fromPiece = state.game.board[fromCoords.row][fromCoords.col];
-      if (fromPiece?.[0] === state.game.playerSide && from !== name) {
-        const promotionRank = state.game.playerSide === "w" ? "8" : "1";
-        const promotion = fromPiece[1] === "p" && name[1] === promotionRank ? "q" : undefined;
-        state.premove = { from, to: name, promotion };
-        state.selected = null;
-        showToast("Premove queued. Click its piece to cancel.");
-        renderBoard();
+      if (queuePremove(state.selected, name)) {
         return;
       }
     }
@@ -654,6 +670,11 @@ function onPieceDrop(event) {
   const from = event.dataTransfer.getData("text/plain");
   const to = event.currentTarget.dataset.square;
   if (from && to) {
+    if (!state.isSpectator && state.game?.playerSide !== state.game?.turn) {
+      if (queuePremove(from, to)) return;
+      showToast("Choose one of your pieces and a different destination.");
+      return;
+    }
     state.selected = from;
     onSquareClick(to);
   }
@@ -893,26 +914,32 @@ if (!state.roomCode) {
       window.setTimeout(() => window.location.replace("/"), 1800);
     });
 }
-window.setInterval(async () => {
-  if (!state.roomCode || !state.game || state.busy) return;
+async function pollGameState() {
+  if (!state.roomCode) return;
   try {
-    const next = await api(roomApiPath(state.isSpectator ? "/spectate" : ""));
-    if (next.history.length !== state.game.history.length ||
-        next.status !== state.game.status || next.result !== state.game.result ||
-        next.clockStartedAt !== state.game.clockStartedAt ||
-        next.rematchRequestedBy !== state.game.rematchRequestedBy ||
-        JSON.stringify(next.ratingChanges) !== JSON.stringify(state.game.ratingChanges) ||
-        next.history.at(-1)?.grade !== state.game.history.at(-1)?.grade) {
-      updateGame(next, next.history.length > state.game.history.length);
-    } else {
-      state.game.whiteTimeMs = next.whiteTimeMs;
-      state.game.blackTimeMs = next.blackTimeMs;
-      state.game.clockStartedAt = next.clockStartedAt;
-      state.clockSyncAt = Date.now();
-      renderClocks();
+    if (state.game && !state.busy) {
+      const next = await api(roomApiPath(state.isSpectator ? "/spectate" : ""));
+      if (next.history.length !== state.game.history.length ||
+          next.status !== state.game.status || next.result !== state.game.result ||
+          next.clockStartedAt !== state.game.clockStartedAt ||
+          next.rematchRequestedBy !== state.game.rematchRequestedBy ||
+          JSON.stringify(next.ratingChanges) !== JSON.stringify(state.game.ratingChanges) ||
+          next.history.at(-1)?.grade !== state.game.history.at(-1)?.grade) {
+        updateGame(next, next.history.length > state.game.history.length);
+      } else {
+        state.game.whiteTimeMs = next.whiteTimeMs;
+        state.game.blackTimeMs = next.blackTimeMs;
+        state.game.clockStartedAt = next.clockStartedAt;
+        state.clockSyncAt = Date.now();
+        renderClocks();
+      }
     }
   } catch (error) {
     showToast(error.message);
+  } finally {
+    const pollDelay = state.premove ? 400 : 1000;
+    window.setTimeout(pollGameState, pollDelay);
   }
-}, 1000);
+}
+window.setTimeout(pollGameState, 1000);
 window.setInterval(updateClock, 100);

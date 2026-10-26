@@ -213,8 +213,17 @@ def create_app(
         app.config["DATABASE_BACKEND"] = backend
         app.config.update(wasmer_database)
         app.config["DB_SSL_CA"] = os.environ.get("CHESS_DB_SSL_CA")
-
     initialize_database(app.config["DATABASE_BACKEND"], app.config)
+
+    @app.after_request
+    def cache_stockfish_assets(response):
+        if request.path in {
+            "/engine/stockfish-19-lite-single.js",
+            "/engine/stockfish-19-lite-single.wasm",
+        }:
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return response
+
     app.register_blueprint(bp)
     return app
 
@@ -301,6 +310,15 @@ def initialize_database(backend: str, config: dict[str, Any]) -> None:
                     connection.execute(
                         f"ALTER TABLE games ADD COLUMN {name} {definition}"
                     )
+            for name, columns in (
+                ("games_white_user_status_created", "white_user_id, status, created_at DESC, id DESC"),
+                ("games_black_user_status_created", "black_user_id, status, created_at DESC, id DESC"),
+                ("games_status_created", "status, created_at DESC"),
+                ("games_invited_status_created", "invited_user_id, status, created_at DESC"),
+            ):
+                connection.execute(
+                    f"CREATE INDEX IF NOT EXISTS {name} ON games ({columns})"
+                )
         finally:
             connection.close()
         return
@@ -367,6 +385,10 @@ def initialize_database(backend: str, config: dict[str, Any]) -> None:
             "ALTER TABLE games ADD COLUMN IF NOT EXISTS white_last_seen_at BIGINT",
             "ALTER TABLE games ADD COLUMN IF NOT EXISTS black_last_seen_at BIGINT",
             "ALTER TABLE games ADD COLUMN IF NOT EXISTS rematch_requested_by VARCHAR(1)",
+            "CREATE INDEX IF NOT EXISTS games_white_user_status_created ON games (white_user_id, status, created_at DESC, id DESC)",
+            "CREATE INDEX IF NOT EXISTS games_black_user_status_created ON games (black_user_id, status, created_at DESC, id DESC)",
+            "CREATE INDEX IF NOT EXISTS games_status_created ON games (status, created_at DESC)",
+            "CREATE INDEX IF NOT EXISTS games_invited_status_created ON games (invited_user_id, status, created_at DESC)",
         )
         try:
             for statement in schema:
@@ -464,6 +486,17 @@ def initialize_database(backend: str, config: dict[str, Any]) -> None:
         for name, definition in column_types.items():
             if name not in columns:
                 connection.execute(f"ALTER TABLE games ADD COLUMN {name} {definition}")
+        existing_indexes = {
+            row["Key_name"] for row in connection.execute("SHOW INDEX FROM games").fetchall()
+        }
+        for name, columns in (
+            ("games_white_user_status_created", "white_user_id, status, created_at DESC, id DESC"),
+            ("games_black_user_status_created", "black_user_id, status, created_at DESC, id DESC"),
+            ("games_status_created", "status, created_at DESC"),
+            ("games_invited_status_created", "invited_user_id, status, created_at DESC"),
+        ):
+            if name not in existing_indexes:
+                connection.execute(f"CREATE INDEX {name} ON games ({columns})")
         connection.commit()
     finally:
         connection.close()
@@ -586,6 +619,23 @@ def user_profile(user_id: int):
     if profile is None:
         return error("That account could not be found.", 404)
 
+    record = database().execute(
+        """
+        SELECT
+            COUNT(CASE WHEN
+                (white_user_id = ? AND result LIKE 'White wins%')
+                OR (black_user_id = ? AND result LIKE 'Black wins%')
+                THEN 1 END) AS wins,
+            COUNT(CASE WHEN result LIKE 'Draw%' THEN 1 END) AS draws,
+            COUNT(*) AS total
+        FROM games
+        WHERE ((white_user_id = ? AND status = 'completed')
+            OR (black_user_id = ? AND status = 'completed'))
+            AND result IS NOT NULL
+        """,
+        (user_id, user_id, user_id, user_id),
+    ).fetchone()
+
     games = database().execute(
         """
         SELECT g.result, g.created_at,
@@ -598,11 +648,13 @@ def user_profile(user_id: int):
         WHERE (g.white_user_id = ? OR g.black_user_id = ?)
             AND g.status = 'completed' AND g.result IS NOT NULL
         ORDER BY g.created_at DESC, g.id DESC
+        LIMIT 10
         """,
         (user_id, user_id, user_id, user_id),
     ).fetchall()
 
-    record = {"wins": 0, "draws": 0, "losses": 0}
+    wins = record["wins"] or 0
+    draws = record["draws"] or 0
     recent_games = []
     for game in games:
         won = game["result"].startswith(
@@ -610,21 +662,19 @@ def user_profile(user_id: int):
         )
         drawn = game["result"].startswith("Draw")
         outcome = "win" if won else "draw" if drawn else "loss"
-        record[{"win": "wins", "draw": "draws", "loss": "losses"}[outcome]] += 1
-        if len(recent_games) < 10:
-            rating_change = None
-            if game["rating_changes_json"]:
-                changes = json.loads(game["rating_changes_json"])
-                side_change = changes.get(game["side"])
-                if side_change:
-                    rating_change = side_change.get("change")
-            recent_games.append({
-                "outcome": outcome,
-                "result": game["result"],
-                "opponent": game["opponent"] or "Guest",
-                "playedAt": str(game["created_at"]),
-                "ratingChange": rating_change,
-            })
+        rating_change = None
+        if game["rating_changes_json"]:
+            changes = json.loads(game["rating_changes_json"])
+            side_change = changes.get(game["side"])
+            if side_change:
+                rating_change = side_change.get("change")
+        recent_games.append({
+            "outcome": outcome,
+            "result": game["result"],
+            "opponent": game["opponent"] or "Guest",
+            "playedAt": str(game["created_at"]),
+            "ratingChange": rating_change,
+        })
 
     return jsonify(
         profile={
@@ -632,7 +682,11 @@ def user_profile(user_id: int):
             "username": profile["username"],
             "rating": profile["rating"],
             "memberSince": str(profile["created_at"]),
-            "record": record,
+            "record": {
+                "wins": wins,
+                "draws": draws,
+                "losses": (record["total"] or 0) - wins - draws,
+            },
             "recentGames": recent_games,
         }
     )
@@ -1050,6 +1104,33 @@ def room_side(room: sqlite3.Row, user: sqlite3.Row | None, visitor_id: str) -> s
     return None
 
 
+def _history_entry(
+    board: chess.Board, move: chess.Move, grade: dict[str, Any]
+) -> dict[str, Any]:
+    color = "w" if board.turn else "b"
+    captured_piece = board.piece_at(move.to_square)
+    captured_at = chess.square_name(move.to_square)
+    if board.is_en_passant(move):
+        captured_square = move.to_square - 8 if board.turn else move.to_square + 8
+        captured_piece = board.piece_at(captured_square)
+        captured_at = chess.square_name(captured_square)
+    san = board.san(move)
+    board.push(move)
+    piece = board.piece_at(move.to_square)
+    return {
+        "from": chess.square_name(move.from_square),
+        "to": chess.square_name(move.to_square),
+        "san": san,
+        "color": color,
+        "piece": piece.symbol().lower() if piece else "",
+        "captured": captured_piece.symbol().lower() if captured_piece else None,
+        "promotion": chess.piece_symbol(move.promotion) if move.promotion else None,
+        "grade": grade.get("grade"),
+        "centipawnLoss": grade.get("centipawnLoss"),
+        "capturedAt": captured_at if captured_piece else None,
+    }
+
+
 def room_board(room: sqlite3.Row) -> tuple[chess.Board, list[dict[str, Any]]]:
     moves = json.loads(room["moves_json"])
     grades = json.loads(room["grades_json"])
@@ -1057,29 +1138,8 @@ def room_board(room: sqlite3.Row) -> tuple[chess.Board, list[dict[str, Any]]]:
     history = []
     for index, uci in enumerate(moves):
         move = chess.Move.from_uci(uci)
-        color = "w" if board.turn else "b"
-        captured_piece = board.piece_at(move.to_square)
-        captured_at = chess.square_name(move.to_square)
-        if board.is_en_passant(move):
-            captured_square = move.to_square - 8 if board.turn else move.to_square + 8
-            captured_piece = board.piece_at(captured_square)
-            captured_at = chess.square_name(captured_square)
-        san = board.san(move)
-        board.push(move)
         grade = grades[index] if index < len(grades) else {}
-        history.append({
-            "from": chess.square_name(move.from_square),
-            "to": chess.square_name(move.to_square),
-            "san": san,
-            "color": color,
-            "piece": (board.piece_at(move.to_square).symbol().lower()
-                      if board.piece_at(move.to_square) else ""),
-            "captured": captured_piece.symbol().lower() if captured_piece else None,
-            "promotion": chess.piece_symbol(move.promotion) if move.promotion else None,
-            "grade": grade.get("grade"),
-            "centipawnLoss": grade.get("centipawnLoss"),
-            "capturedAt": captured_at if captured_piece else None,
-        })
+        history.append(_history_entry(board, move, grade))
     return board, history
 
 
@@ -1181,8 +1241,12 @@ def rate_completed_game(
     )
 
 
-def room_snapshot(room: sqlite3.Row, side: str) -> dict[str, Any]:
-    board, history = room_board(room)
+def room_snapshot(
+    room: sqlite3.Row,
+    side: str,
+    position: tuple[chess.Board, list[dict[str, Any]]] | None = None,
+) -> dict[str, Any]:
+    board, history = position if position is not None else room_board(room)
     grades = json.loads(room["grades_json"])
     white_time_ms, black_time_ms = remaining_clocks(room)
     last_analysis = grades[-1] if grades else {}
@@ -1461,12 +1525,13 @@ def make_move(code: str):
         )
         rate_completed_game(connection, room, result)
         connection.commit()
-        return jsonify(room_snapshot(load_room(code.upper()), side))
+        return jsonify(room_snapshot(load_room(code.upper()), side, (board, _history)))
     moves = json.loads(room["moves_json"])
     grades = json.loads(room["grades_json"])
     moves.append(uci)
     grades.append({})
-    board.push(move)
+    history = _history
+    history.append(_history_entry(board, move, {}))
     result = result_for(board)
     if board.turn == chess.BLACK:
         white_ms += room["increment_seconds"] * 1000
@@ -1494,7 +1559,7 @@ def make_move(code: str):
         synchronize_room_clock(load_room(code.upper()), int(time.time() * 1000))
     connection.commit()
     room = load_room(code.upper())
-    return jsonify(room_snapshot(room, side))
+    return jsonify(room_snapshot(room, side, (board, history)))
 
 
 @bp.post("/api/rooms/<code>/analysis")
