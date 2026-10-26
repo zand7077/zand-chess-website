@@ -1706,6 +1706,6 @@ app = create_app()
 
 if __name__ == "__main__":
     production = os.environ.get("CHESS_ENV", "").lower() == "production"
-    port = int(os.environ.get("PORT", "80" if production else "20202"))
-    host = os.environ.get("CHESS_HOST", "0.0.0.0" if production else "127.0.0.1")
+    port = int(os.environ.get("PORT", "20202" if production else "20202"))
+    host = os.environ.get("CHESS_HOST", "0.0.0.0" if production else "0.0.0.0")
     app.run(host=host, port=port, threaded=True)
