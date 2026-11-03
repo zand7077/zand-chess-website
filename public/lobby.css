@@ -46,7 +46,7 @@ input:focus, select:focus { outline: 2px solid #a6503d66; border-color: var(--ac
 .invite-share .button { min-width: 0; padding: 8px 10px; white-space: normal; font-size: 11px; }
 .invite-share .hint { margin: 0; }
 .quick-play { display: grid; grid-template-columns: minmax(160px, .8fr) minmax(160px, 1fr) minmax(230px, 1.3fr); gap: 16px; align-items: end; }
-.bot-play { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; gap: 8px; align-items: stretch; width: min(100%, 760px); margin-top: 14px; padding: 12px; border: 1px solid var(--edge); border-radius: 10px; background: linear-gradient(120deg, #fffefa, #f1eee7); }
+.bot-play { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; align-items: stretch; width: 100%; margin-top: 14px; padding: 12px; border: 1px solid var(--edge); border-radius: 10px; background: linear-gradient(120deg, #fffefa, #f1eee7); }
 .bot-picker-heading { grid-column: 1 / -1; display: flex; align-items: baseline; gap: 9px; }
 .bot-picker-heading h3 { margin: 0; font-size: 15px; }
 .bot-options { display: contents; }
@@ -59,7 +59,7 @@ input:focus, select:focus { outline: 2px solid #a6503d66; border-color: var(--ac
 .bot-avatar { color: #555d60; font: 20px/1 "Segoe UI Symbol", serif; }
 .bot-option-name { font-size: 11px; font-weight: 800; }
 .bot-option-rating { color: var(--muted); font: 9px "DM Mono", monospace; }
-.bot-play .button { align-self: stretch; min-width: 118px; padding: 8px 11px; font-size: 12px; }
+.bot-play .button { grid-column: 1 / -1; justify-self: end; min-width: 118px; min-height: 38px; padding: 8px 11px; font-size: 12px; }
 .join-row { display: flex; gap: 8px; }
 .join-row input { flex: 1; }
 .hint { margin: 12px 0 0; font-size: 12px; }
@@ -153,7 +153,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outlin
   .bot-play { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; padding: 10px; }
   .bot-option-card { min-height: 72px; padding: 6px 3px; }
   .bot-option-name { font-size: 10px; }
-  .bot-play .button { grid-column: 1 / -1; min-height: 40px; }
+  .bot-play .button { justify-self: stretch; min-height: 40px; }
   .invite-share .join-row { grid-template-columns: minmax(0, 1fr); }
   .community-panel { padding: 12px 15px 15px; }
   .profile-card { padding: 20px 15px; }
