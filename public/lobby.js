@@ -324,7 +324,7 @@ async function loadDashboard() {
           });
           tell(`Invitation sent to ${friend.username}.`);
           await copyInvite(invite.roomCode);
-          window.location.href = `/play?room=${encodeURIComponent(invite.roomCode)}`;
+          await loadDashboard();
         } catch (error) { tell(error.message); }
       }, true);
     }
@@ -368,9 +368,22 @@ async function loadDashboard() {
     const games = document.querySelector("#game-list");
     games.replaceChildren();
     if (!data.games.length) games.innerHTML = '<p class="muted">No active games.</p>';
+    const presentInvite = data.games.find(
+      (game) => game.is_creator && game.status === "waiting" &&
+        game.invited_user_id !== null && game.opponent_present,
+    );
+    const opponentNotification = document.querySelector("#opponent-notification");
+    opponentNotification.classList.toggle("hidden", !presentInvite);
+    if (presentInvite) {
+      document.querySelector("#opponent-notification-text").textContent =
+        "Your opponent is here and ready to join.";
+      document.querySelector("#opponent-notification-join").href =
+        `/play?room=${encodeURIComponent(presentInvite.room_code)}`;
+    }
     for (const game of data.games) {
       const white = game.white_name || "Guest";
-      const black = game.black_name || (game.status === "waiting" ? "Waiting for player" : "Guest");
+      const black = game.black_name ||
+        (game.status === "waiting" ? "Waiting for player" : "Guest");
       const row = document.createElement("div");
       row.className = "game-list-item";
       const details = document.createElement("div");
@@ -379,7 +392,9 @@ async function loadDashboard() {
       players.textContent = `${white} vs ${black}`;
       const status = document.createElement("span");
       status.textContent = game.status === "waiting"
-        ? "Your room is ready when your opponent joins."
+        ? game.opponent_present
+          ? "Your opponent is here. Join the room when you’re ready."
+          : "Your room is ready when your opponent joins."
         : "Your match is in progress. Pick up where you left off.";
       details.append(players, status);
       const continueButton = button(
@@ -484,6 +499,24 @@ document.querySelector("#logout-button").addEventListener("click", async () => {
     setAccountView(null);
     tell("You have signed out.");
   } catch (error) { tell(error.message); }
+});
+
+document.querySelector("#play-bot").addEventListener("click", async (event) => {
+  const playButton = event.currentTarget;
+  playButton.disabled = true;
+  try {
+    const game = await api("/api/bot-games", {
+      method: "POST",
+      body: JSON.stringify({
+        botElo: Number(document.querySelector("#bot-opponent").value),
+        timeControl: document.querySelector("#time-control").value,
+      }),
+    });
+    window.location.href = `/play?room=${encodeURIComponent(game.roomCode)}`;
+  } catch (error) {
+    tell(error.message);
+    playButton.disabled = false;
+  }
 });
 
 function closeProfile() {

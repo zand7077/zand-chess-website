@@ -16,6 +16,10 @@
       </a>
       <button id="logout-button" class="button quiet hidden" type="button">Sign out</button>
     </header>
+    <aside id="opponent-notification" class="opponent-notification hidden" role="status" aria-live="polite">
+      <span id="opponent-notification-text"></span>
+      <a id="opponent-notification-join" class="button primary" href="/">Join game</a>
+    </aside>
     <section id="account-panel" class="account-panel">
       <div class="intro">
         <span class="eyebrow">YOUR NEXT MATCH</span>
@@ -59,6 +63,17 @@
           <div class="join-row"><input id="room-code" maxlength="8" autocomplete="off" placeholder="ABCD1234" required><button class="button" type="submit">Join</button></div>
         </form>
       </div>
+      <div class="bot-play">
+        <label for="bot-opponent">Play against Stockfish
+          <select id="bot-opponent">
+            <option value="200">Beginner · approximately 200 Elo</option>
+            <option value="1000">Intermediate · approximately 1000 Elo</option>
+            <option value="1600">Karti · approximately 1600 Elo</option>
+          </select>
+        </label>
+        <button id="play-bot" class="button" type="button">Play a bot</button>
+      </div>
+      <p class="hint">Bot strengths are approximate. Bot games do not affect account ratings.</p>
       <p class="hint">Choose a clock for both players. No account is needed to play in a room.</p>
     </section>
 

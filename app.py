@@ -30,6 +30,11 @@ TIME_CONTROLS = {
     "rapid_10_0": {"label": "Rapid · 10+0", "seconds": 600, "increment": 0},
     "rapid_15_10": {"label": "Rapid · 15+10", "seconds": 900, "increment": 10},
 }
+BOT_ELOS = {200, 1000, 1600}
+
+
+def bot_display_name(elo: int) -> str:
+    return "Karti" if elo == 1600 else f"Stockfish ({elo} Elo)"
 
 
 class DatabaseIntegrityError(Exception):
@@ -264,6 +269,8 @@ def initialize_database(backend: str, config: dict[str, Any]) -> None:
                     white_guest_id TEXT,
                     black_guest_id TEXT,
                     invited_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                    creator_side TEXT NOT NULL DEFAULT 'w',
+                    bot_elo INTEGER,
                     moves_json TEXT NOT NULL DEFAULT '[]',
                     grades_json TEXT NOT NULL DEFAULT '[]',
                     rating_changes_json TEXT,
@@ -296,6 +303,8 @@ def initialize_database(backend: str, config: dict[str, Any]) -> None:
                     "ALTER TABLE games ADD COLUMN rating_changes_json TEXT"
                 )
             column_types = {
+                "creator_side": "TEXT NOT NULL DEFAULT 'w'",
+                "bot_elo": "INTEGER",
                 "time_control": "TEXT NOT NULL DEFAULT 'rapid_10_0'",
                 "white_time_ms": "INTEGER NOT NULL DEFAULT 600000",
                 "black_time_ms": "INTEGER NOT NULL DEFAULT 600000",
@@ -363,6 +372,8 @@ def initialize_database(backend: str, config: dict[str, Any]) -> None:
                 white_guest_id TEXT,
                 black_guest_id TEXT,
                 invited_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+                creator_side VARCHAR(1) NOT NULL DEFAULT 'w',
+                bot_elo INTEGER,
                 moves_json TEXT NOT NULL DEFAULT '[]',
                 grades_json TEXT NOT NULL DEFAULT '[]',
                 rating_changes_json TEXT,
@@ -382,6 +393,8 @@ def initialize_database(backend: str, config: dict[str, Any]) -> None:
             "CREATE UNIQUE INDEX IF NOT EXISTS users_username_lower_unique ON users (LOWER(username))",
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS rating INTEGER NOT NULL DEFAULT 800",
             "ALTER TABLE games ADD COLUMN IF NOT EXISTS rating_changes_json TEXT",
+            "ALTER TABLE games ADD COLUMN IF NOT EXISTS creator_side VARCHAR(1) NOT NULL DEFAULT 'w'",
+            "ALTER TABLE games ADD COLUMN IF NOT EXISTS bot_elo INTEGER",
             "ALTER TABLE games ADD COLUMN IF NOT EXISTS white_last_seen_at BIGINT",
             "ALTER TABLE games ADD COLUMN IF NOT EXISTS black_last_seen_at BIGINT",
             "ALTER TABLE games ADD COLUMN IF NOT EXISTS rematch_requested_by VARCHAR(1)",
@@ -439,6 +452,8 @@ def initialize_database(backend: str, config: dict[str, Any]) -> None:
             white_guest_id VARCHAR(64),
             black_guest_id VARCHAR(64),
             invited_user_id BIGINT,
+            creator_side VARCHAR(1) NOT NULL DEFAULT 'w',
+            bot_elo INTEGER,
             moves_json TEXT NOT NULL,
             grades_json TEXT NOT NULL,
             rating_changes_json TEXT,
@@ -474,6 +489,8 @@ def initialize_database(backend: str, config: dict[str, Any]) -> None:
                 row["Field"] for row in connection.execute("SHOW COLUMNS FROM games").fetchall()
             }
         column_types = {
+            "creator_side": "VARCHAR(1) NOT NULL DEFAULT 'w'",
+            "bot_elo": "INTEGER",
             "time_control": "VARCHAR(24) NOT NULL DEFAULT 'rapid_10_0'",
             "white_time_ms": "BIGINT NOT NULL DEFAULT 600000",
             "black_time_ms": "BIGINT NOT NULL DEFAULT 600000",
@@ -574,7 +591,7 @@ def session_info():
 def live_matches():
     matches = database().execute(
         """
-        SELECT g.room_code, white.username AS white_name,
+        SELECT g.room_code, g.bot_elo, white.username AS white_name,
             black.username AS black_name, g.time_control, g.moves_json
         FROM games g
         LEFT JOIN users white ON white.id = g.white_user_id
@@ -588,7 +605,10 @@ def live_matches():
         {
             "roomCode": match["room_code"],
             "whiteName": match["white_name"] or "Guest",
-            "blackName": match["black_name"] or "Guest",
+            "blackName": (
+                bot_display_name(match["bot_elo"])
+                if match["bot_elo"] is not None else match["black_name"] or "Guest"
+            ),
             "timeControl": TIME_CONTROLS.get(
                 match["time_control"], TIME_CONTROLS["rapid_10_0"]
             )["label"],
@@ -638,7 +658,7 @@ def user_profile(user_id: int):
 
     games = database().execute(
         """
-        SELECT g.result, g.created_at,
+        SELECT g.result, g.created_at, g.bot_elo,
             CASE WHEN g.white_user_id = ? THEN 'white' ELSE 'black' END AS side,
             CASE WHEN g.white_user_id = ? THEN black.username ELSE white.username END AS opponent,
             g.rating_changes_json
@@ -671,7 +691,10 @@ def user_profile(user_id: int):
         recent_games.append({
             "outcome": outcome,
             "result": game["result"],
-            "opponent": game["opponent"] or "Guest",
+            "opponent": (
+                bot_display_name(game["bot_elo"])
+                if game["bot_elo"] is not None else game["opponent"] or "Guest"
+            ),
             "playedAt": str(game["created_at"]),
             "ratingChange": rating_change,
         })
@@ -754,6 +777,22 @@ def dashboard():
     if user is None:
         return error("Sign in to use your friends list.", 401)
     connection = database()
+    now_ms = int(time.time() * 1000)
+    connection.execute(
+        """
+        UPDATE games SET
+            white_last_seen_at = CASE WHEN white_user_id = ? THEN ? ELSE white_last_seen_at END,
+            black_last_seen_at = CASE WHEN black_user_id = ? THEN ? ELSE black_last_seen_at END
+        WHERE status = 'waiting' AND invited_user_id IS NOT NULL
+            AND (
+                (creator_side = 'w' AND white_user_id = ?)
+                OR (creator_side = 'b' AND black_user_id = ?)
+            )
+        """,
+        (user["id"], now_ms, user["id"], now_ms, user["id"], user["id"]),
+    )
+    connection.commit()
+
     friends = connection.execute(
         """
         SELECT u.id, u.username, u.rating FROM friendships f
@@ -773,8 +812,12 @@ def dashboard():
     ).fetchall()
     invitations = connection.execute(
         """
-        SELECT g.room_code, u.username AS inviter FROM games g
-        JOIN users u ON u.id = g.white_user_id
+        SELECT g.room_code,
+            CASE WHEN g.white_user_id = g.invited_user_id
+                THEN black.username ELSE white.username END AS inviter
+        FROM games g
+        LEFT JOIN users white ON white.id = g.white_user_id
+        LEFT JOIN users black ON black.id = g.black_user_id
         WHERE g.invited_user_id = ? AND g.status = 'waiting'
         ORDER BY g.created_at DESC
         """,
@@ -782,7 +825,9 @@ def dashboard():
     ).fetchall()
     games = connection.execute(
         """
-        SELECT g.room_code, g.status, g.created_at,
+        SELECT g.room_code, g.status, g.created_at, g.bot_elo, g.creator_side,
+            g.invited_user_id, g.white_user_id, g.black_user_id,
+            g.white_last_seen_at, g.black_last_seen_at,
             white.username AS white_name, black.username AS black_name
         FROM games g
         LEFT JOIN users white ON white.id = g.white_user_id
@@ -792,11 +837,31 @@ def dashboard():
         """,
         (user["id"], user["id"]),
     ).fetchall()
+    now_ms = int(time.time() * 1000)
+    game_items = []
+    for game in games:
+        creator_side = game["creator_side"]
+        opponent_side = "b" if creator_side == "w" else "w"
+        opponent_color = "black" if opponent_side == "b" else "white"
+        creator_color = "white" if creator_side == "w" else "black"
+        opponent_seen = game[f"{opponent_color}_last_seen_at"]
+        game_item = dict(game)
+        game_item["is_creator"] = game[f"{creator_color}_user_id"] == user["id"]
+        game_item["opponent_present"] = (
+            game["status"] == "waiting"
+            and game["invited_user_id"] is not None
+            and opponent_seen is not None
+            and now_ms - opponent_seen <= PRESENCE_TIMEOUT_MS
+        )
+        if game["bot_elo"] is not None:
+            game_item["black_name"] = bot_display_name(game["bot_elo"])
+        game_items.append(game_item)
+
     return jsonify(
         friends=[user_json(friend) for friend in friends],
         requests=[dict(row) for row in requests],
         invitations=[dict(row) for row in invitations],
-        games=[dict(row) for row in games],
+        games=game_items,
     )
 
 
@@ -909,18 +974,58 @@ def create_room():
     time_control, settings = selected_time_control
     user = current_user()
     visitor_id = guest_id() if user is None else None
+    creator_side = "w" if secrets.randbelow(2) == 0 else "b"
+    white_user_id = user["id"] if user is not None and creator_side == "w" else None
+    black_user_id = user["id"] if user is not None and creator_side == "b" else None
+    white_guest_id = visitor_id if visitor_id is not None and creator_side == "w" else None
+    black_guest_id = visitor_id if visitor_id is not None and creator_side == "b" else None
     code = new_room_code()
     database().execute(
         """
         INSERT INTO games(
-            room_code, white_user_id, white_guest_id,
+            room_code, white_user_id, black_user_id, white_guest_id, black_guest_id,
+            creator_side,
             moves_json, grades_json, status, time_control,
             white_time_ms, black_time_ms, increment_seconds
         )
-        VALUES (?, ?, ?, '[]', '[]', ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, '[]', '[]', ?, ?, ?, ?, ?)
         """,
         (
-            code, user["id"] if user else None, visitor_id, "waiting",
+            code, white_user_id, black_user_id, white_guest_id, black_guest_id,
+            creator_side, "waiting",
+            time_control, int(settings["seconds"]) * 1000,
+            int(settings["seconds"]) * 1000, int(settings["increment"]),
+        ),
+    )
+    database().commit()
+    return jsonify(
+        roomCode=code, url=f"/play?room={code}", playerSide=creator_side
+    ), 201
+
+
+@bp.post("/api/bot-games")
+def create_bot_game():
+    selected_time_control = requested_time_control()
+    if selected_time_control is None:
+        return error("Choose a supported time control.")
+    time_control, settings = selected_time_control
+    bot_elo = json_body().get("botElo")
+    if not isinstance(bot_elo, int) or isinstance(bot_elo, bool) or bot_elo not in BOT_ELOS:
+        return error("Choose a supported Stockfish opponent.")
+    user = current_user()
+    visitor_id = guest_id() if user is None else None
+    code = new_room_code()
+    database().execute(
+        """
+        INSERT INTO games(
+            room_code, white_user_id, white_guest_id, creator_side, bot_elo,
+            moves_json, grades_json, status, time_control,
+            white_time_ms, black_time_ms, increment_seconds
+        )
+        VALUES (?, ?, ?, 'w', ?, '[]', '[]', 'active', ?, ?, ?, ?)
+        """,
+        (
+            code, user["id"] if user else None, visitor_id, bot_elo,
             time_control, int(settings["seconds"]) * 1000,
             int(settings["seconds"]) * 1000, int(settings["increment"]),
         ),
@@ -942,23 +1047,28 @@ def invite_friend():
     if not isinstance(friend_id, int) or not room_user_is_friend(user["id"], friend_id):
         return error("Choose someone from your friends list.")
     code = new_room_code()
+    inviter_side = "w" if secrets.randbelow(2) == 0 else "b"
+    white_user_id, black_user_id = (
+        (user["id"], friend_id) if inviter_side == "w" else (friend_id, user["id"])
+    )
     database().execute(
         """
         INSERT INTO games(
-            room_code, white_user_id, invited_user_id,
+            room_code, white_user_id, black_user_id, invited_user_id, creator_side,
             moves_json, grades_json, status, time_control,
             white_time_ms, black_time_ms, increment_seconds
         )
-        VALUES (?, ?, ?, '[]', '[]', ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, '[]', '[]', ?, ?, ?, ?, ?)
         """,
         (
-            code, user["id"], friend_id, "waiting", time_control,
+            code, white_user_id, black_user_id, friend_id, inviter_side,
+            "waiting", time_control,
             int(settings["seconds"]) * 1000, int(settings["seconds"]) * 1000,
             int(settings["increment"]),
         ),
     )
     database().commit()
-    return jsonify(roomCode=code), 201
+    return jsonify(roomCode=code, playerSide=inviter_side), 201
 
 
 def load_room(code: str, for_update: bool = False) -> sqlite3.Row | None:
@@ -1002,6 +1112,8 @@ def synchronize_room_clock(room: sqlite3.Row, now_ms: int) -> sqlite3.Row:
         and now_ms - room[f"{side}_last_seen_at"] <= PRESENCE_TIMEOUT_MS
         for side in ("white", "black")
     }
+    if room["bot_elo"] is not None:
+        present["black"] = True
     started_at = room["clock_started_at"]
     if all(present.values()) and started_at is not None:
         white_ms, black_ms = remaining_clocks(room, now_ms)
@@ -1265,6 +1377,15 @@ def room_snapshot(
             key: final[key]
             for key in ("from", "to", "captured", "capturedAt", "grade", "centipawnLoss")
         }
+    opponent_side = "b" if side == "w" else "w"
+    opponent_seen_at = room[f"{'black' if opponent_side == 'b' else 'white'}_last_seen_at"]
+    opponent_present = (
+        room["bot_elo"] is not None
+        or (
+            opponent_seen_at is not None
+            and int(time.time() * 1000) - opponent_seen_at <= PRESENCE_TIMEOUT_MS
+        )
+    )
     return {
         "board": [
             [
@@ -1283,18 +1404,29 @@ def room_snapshot(
         "timeControl": TIME_CONTROLS.get(
             room["time_control"], TIME_CONTROLS["rapid_10_0"]
         )["label"],
+        "timeControlKey": room["time_control"],
         "whiteTimeMs": white_time_ms,
         "blackTimeMs": black_time_ms,
         "clockStartedAt": room["clock_started_at"],
         "rematchRequestedBy": room["rematch_requested_by"],
         "roomCode": room["room_code"],
+        "botElo": room["bot_elo"],
         "playerSide": side,
+        "canCloseWaitingRoom": side == room["creator_side"],
+        "opponentPresent": opponent_present,
         "whiteName": room["white_name"] or "Guest",
-        "blackName": room["black_name"] or (
-            "Waiting for opponent" if room["status"] == "waiting" else "Guest"
+        "blackName": (
+            bot_display_name(room["bot_elo"])
+            if room["bot_elo"] is not None else room["black_name"] or (
+                "Waiting for opponent" if room["status"] == "waiting" else "Guest"
+            )
         ),
         "whiteRating": room["white_rating"] if room["white_rating"] is not None else 800,
-        "blackRating": room["black_rating"] if room["black_rating"] is not None else 800,
+        "blackRating": (
+            room["bot_elo"]
+            if room["bot_elo"] is not None
+            else room["black_rating"] if room["black_rating"] is not None else 800
+        ),
         "ratingChanges": (
             json.loads(room["rating_changes_json"])
             if room["rating_changes_json"] is not None else None
@@ -1337,18 +1469,44 @@ def join_room(code: str):
     visitor = guest_id() if user is None else None
     existing_side = room_side(room, user, visitor or "")
     if existing_side:
+        if (
+            room["status"] == "waiting"
+            and room["invited_user_id"] is not None
+            and user is not None
+            and user["id"] == room["invited_user_id"]
+        ):
+            connection = database()
+            connection.execute("BEGIN IMMEDIATE")
+            fresh = load_room(code.upper(), for_update=True)
+            if fresh is None or fresh["status"] != "waiting":
+                connection.rollback()
+                return error("This invitation is no longer waiting for a player.", 409)
+            seen_column = "white_last_seen_at" if existing_side == "w" else "black_last_seen_at"
+            connection.execute(
+                f"UPDATE games SET status = 'active', {seen_column} = ?, clock_started_at = NULL "
+                "WHERE id = ? AND status = 'waiting'",
+                (int(time.time() * 1000), fresh["id"]),
+            )
+            room = synchronize_room_clock(
+                load_room(code.upper()), int(time.time() * 1000)
+            )
+            connection.commit()
+            room = load_room(code.upper())
+            return jsonify(room_snapshot(room, existing_side))
         room = update_room_presence(code.upper(), existing_side, True)
         return jsonify(room_snapshot(room, existing_side))
-    if room["status"] != "waiting" or room["black_user_id"] or room["black_guest_id"]:
-        return error("This room already has two players.", 409)
-    if room["white_user_id"] is not None and user is not None and room["white_user_id"] == user["id"]:
-        return error("You cannot join your own room as the opponent.", 409)
-    if room["white_guest_id"] and visitor and hmac.compare_digest(room["white_guest_id"], visitor):
-        return error("You cannot join your own room as the opponent.", 409)
     if room["invited_user_id"] is not None and (
         user is None or user["id"] != room["invited_user_id"]
     ):
         return error("This room is an invitation for another player.", 403)
+    join_side = "b" if room["creator_side"] == "w" else "w"
+    join_color = "white" if join_side == "w" else "black"
+    if (
+        room["status"] != "waiting"
+        or room[f"{join_color}_user_id"]
+        or room[f"{join_color}_guest_id"]
+    ):
+        return error("This room already has two players.", 409)
     connection = database()
     connection.execute("BEGIN IMMEDIATE")
     fresh = load_room(code.upper(), for_update=True)
@@ -1356,9 +1514,9 @@ def join_room(code: str):
         connection.rollback()
         return error("This room is no longer waiting for a player.", 409)
     connection.execute(
-        """
-        UPDATE games SET black_user_id = ?, black_guest_id = ?, status = 'active',
-            black_last_seen_at = ?, clock_started_at = NULL
+        f"""
+        UPDATE games SET {join_color}_user_id = ?, {join_color}_guest_id = ?,
+            status = 'active', {join_color}_last_seen_at = ?, clock_started_at = NULL
         WHERE id = ? AND status = 'waiting'
         """,
         (user["id"] if user else None, visitor, int(time.time() * 1000), fresh["id"]),
@@ -1366,7 +1524,7 @@ def join_room(code: str):
     room = synchronize_room_clock(load_room(code.upper()), int(time.time() * 1000))
     connection.commit()
     room = load_room(code.upper())
-    return jsonify(room_snapshot(room, "b"))
+    return jsonify(room_snapshot(room, join_side))
 
 
 @bp.get("/api/rooms/<code>")
@@ -1380,10 +1538,10 @@ def get_room_state(code: str):
         and room["invited_user_id"] is not None
         and user is not None
         and user["id"] == room["invited_user_id"]
-        and room["black_user_id"] is None
-        and room["black_guest_id"] is None
     ):
-        snapshot = room_snapshot(room, "b")
+        invited_side = room_side(room, user, "")
+        room = update_room_presence(code.upper(), invited_side, True)
+        snapshot = room_snapshot(room, invited_side)
         snapshot["requiresAcceptance"] = True
         return jsonify(snapshot)
     room, side, failure = authorized_room(code)
@@ -1427,7 +1585,8 @@ def close_room(code: str):
         connection.rollback()
         return error("You are not a player in this room.", 403)
     if room["status"] == "waiting":
-        if side != "w":
+        user = current_user()
+        if side != room["creator_side"]:
             connection.rollback()
             return error("Only the room creator can close a waiting room.", 403)
         connection.execute(
@@ -1465,9 +1624,20 @@ def close_room(code: str):
 
 @bp.post("/api/rooms/<code>/move")
 def make_move(code: str):
+    return apply_room_move(code)
+
+
+@bp.post("/api/rooms/<code>/bot-move")
+def make_bot_move(code: str):
+    return apply_room_move(code, bot_move=True)
+
+
+def apply_room_move(code: str, bot_move: bool = False):
     room, side, failure = authorized_room(code)
     if failure:
         return failure
+    if bot_move and (room["bot_elo"] not in BOT_ELOS or side != "w"):
+        return error("Only the player in a Stockfish game can submit a bot move.", 403)
     body = json_body()
     start, end, promotion = body.get("from"), body.get("to"), body.get("promotion")
     square_pattern = re.compile(r"^[a-h][1-8]$")
@@ -1482,6 +1652,9 @@ def make_move(code: str):
     if side is None:
         connection.rollback()
         return error("You are not a player in this room.", 403)
+    if bot_move and (room["bot_elo"] not in BOT_ELOS or side != "w"):
+        connection.rollback()
+        return error("Only the player in a Stockfish game can submit a bot move.", 403)
     if room["status"] != "active":
         connection.rollback()
         return error("Both players must join before a move can be made.", 409)
@@ -1500,7 +1673,8 @@ def make_move(code: str):
         connection.commit()
         return jsonify(room_snapshot(room, side))
     board, _history = room_board(room)
-    if ("w" if board.turn else "b") != side:
+    move_side = "b" if bot_move else side
+    if ("w" if board.turn else "b") != move_side:
         connection.rollback()
         return error("It is the other player's turn.", 403)
     uci = f"{start}{end}{promotion or ''}"

@@ -22,13 +22,17 @@ const state = {
   roomCode: new URLSearchParams(window.location.search).get("room")?.toUpperCase() || "",
   isSpectator: new URLSearchParams(window.location.search).get("spectate") === "1",
   selected: null,
-  premove: null,
+  premoves: [],
+  drag: null,
+  suppressClick: false,
+  requiresAcceptance: false,
   flipped: false,
   orientationInitialized: false,
   clockSyncAt: Date.now(),
   engineReady: null,
   enginePending: null,
   busy: false,
+  botThinking: false,
   startedAt: Date.now(),
   modalShown: false,
   toastTimer: null,
@@ -42,7 +46,7 @@ const gridSquares = new Map();
 const squareParts = new Map();
 let stockfish = null;
 const gradePopupNames = new Set([
-  "Brilliant", "Excellent", "Blunder", "Grave error", "Missed win",
+  "Brilliant", "Great", "Best", "Blunder", "Grave error", "Missed win",
 ]);
 
 function initializeStockfish() {
@@ -82,7 +86,11 @@ function initializeStockfish() {
       if (line.startsWith("bestmove")) {
         window.clearTimeout(pending.timeout);
         state.enginePending = null;
-        if (pending.score === null) {
+        if (pending.kind === "move") {
+          const bestMove = line.match(/^bestmove\s+([a-h][1-8][a-h][1-8][qrbn]?)/);
+          if (bestMove) pending.resolve(bestMove[1]);
+          else pending.reject(new Error("Stockfish did not return a legal move."));
+        } else if (pending.score === null) {
           pending.reject(new Error("Stockfish did not return an evaluation."));
         } else {
           pending.resolve(pending.score);
@@ -101,6 +109,7 @@ function stockfishScore(fen) {
     await initializeStockfish();
     return new Promise((resolve, reject) => {
       const pending = {
+        kind: "score",
         score: null,
         resolve,
         reject,
@@ -110,6 +119,8 @@ function stockfishScore(fen) {
         }, 12000),
       };
       state.enginePending = pending;
+      stockfish.postMessage("setoption name UCI_LimitStrength value false");
+      stockfish.postMessage("setoption name Skill Level value 20");
       stockfish.postMessage(`position fen ${fen}`);
       stockfish.postMessage("go movetime 80");
     });
@@ -117,6 +128,32 @@ function stockfishScore(fen) {
   engineQueue = request.catch(() => {});
   return request;
 }
+
+function stockfishBestMove(fen, elo) {
+  const request = engineQueue.then(async () => {
+    await initializeStockfish();
+    return new Promise((resolve, reject) => {
+      const pending = {
+        kind: "move",
+        resolve,
+        reject,
+        timeout: window.setTimeout(() => {
+          state.enginePending = null;
+          reject(new Error("Stockfish bot search timed out."));
+        }, 12000),
+      };
+      state.enginePending = pending;
+      stockfish.postMessage("setoption name UCI_LimitStrength value false");
+      stockfish.postMessage(`setoption name Skill Level value ${BOT_SKILL_LEVELS[elo]}`);
+      stockfish.postMessage(`position fen ${fen}`);
+      stockfish.postMessage("go movetime 350");
+    });
+  });
+  engineQueue = request.catch(() => {});
+  return request;
+}
+
+const BOT_SKILL_LEVELS = { 200: 0, 1000: 2, 1600: 5 };
 
 async function analyzeLastMove(beforeFen, next, ply) {
   const bestBefore = await stockfishScore(beforeFen);
@@ -140,6 +177,45 @@ async function analyzeLastMove(beforeFen, next, ply) {
     }),
   });
   await updateGame(analyzed);
+}
+
+async function playBotMove() {
+  if (state.botThinking || state.busy || !state.game ||
+      state.game.botElo === null || state.game.botElo === undefined ||
+      state.game.status !== "active" || state.game.over ||
+      state.game.playerSide !== "w" || state.game.turn !== "b") return;
+  state.botThinking = true;
+  const fen = state.game.fen;
+  const elo = state.game.botElo;
+  try {
+    const bestMove = await stockfishBestMove(fen, elo);
+    if (state.game.fen !== fen || state.game.over) return;
+    const move = elo === 200 && state.game.legalMoves.length > 1 && Math.random() < 0.75
+      ? state.game.legalMoves[Math.floor(Math.random() * state.game.legalMoves.length)]
+      : {
+        from: bestMove.slice(0, 2),
+        to: bestMove.slice(2, 4),
+        promotion: bestMove[4],
+      };
+    const beforeFen = state.game.fen;
+    const next = await api(roomApiPath("/bot-move"), {
+      method: "POST",
+      body: JSON.stringify({
+        from: move.from,
+        to: move.to,
+        ...(move.promotion ? { promotion: move.promotion } : {}),
+      }),
+    });
+    await updateGame(next, true);
+    void analyzeLastMove(beforeFen, next, next.history.length).catch((error) => {
+      if (error.status !== 409) showToast(error.message);
+    });
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    state.botThinking = false;
+    if (state.game?.fen !== fen) void playBotMove();
+  }
 }
 
 function squareName(row, col) {
@@ -179,7 +255,10 @@ function showGradePopup(move) {
   card.append(icon, piece, grade, san);
   popup.append(card);
   document.body.append(popup);
-  state.gradePopupTimer = window.setTimeout(() => popup.remove(), 1800);
+  state.gradePopupTimer = window.setTimeout(
+    () => popup.remove(),
+    move.grade === "Best" ? 900 : 1800,
+  );
 }
 
 function roomApiPath(action = "") {
@@ -200,6 +279,98 @@ async function api(path, options = {}) {
   return result;
 }
 
+function startPieceDrag(drag, x, y) {
+  if (drag.started) return;
+  drag.started = true;
+  const pieceCode = state.game.board[squareCoords(drag.from).row][squareCoords(drag.from).col];
+  const ghost = document.createElement("span");
+  ghost.className = `drag-piece ${pieceCode[0] === "w" ? "white" : "black"}`;
+  ghost.textContent = symbols[pieceCode];
+  document.body.append(ghost);
+  drag.ghost = ghost;
+  movePieceGhost(drag, x, y);
+  renderBoard();
+}
+
+function movePieceGhost(drag, x, y) {
+  if (!drag.ghost) return;
+  drag.ghost.style.left = `${x}px`;
+  drag.ghost.style.top = `${y}px`;
+}
+
+function beginPiecePointer(event) {
+  if (event.button !== 0 || !state.game || state.busy || state.isSpectator ||
+      state.game.over || state.game.status !== "active") return;
+  const square = event.target.closest(".square");
+  if (!square) return;
+  const from = square.dataset.square;
+  const piece = state.game.board[squareCoords(from).row][squareCoords(from).col];
+  if (!piece || piece[0] !== state.game.playerSide) return;
+  const drag = {
+    pointerId: event.pointerId,
+    from,
+    startX: event.clientX,
+    startY: event.clientY,
+    target: from,
+    started: false,
+    timer: null,
+    ghost: null,
+  };
+  state.drag = drag;
+  square.setPointerCapture(event.pointerId);
+  drag.timer = window.setTimeout(
+    () => startPieceDrag(drag, drag.startX, drag.startY),
+    140,
+  );
+  square.classList.add("piece-pressed");
+}
+
+function movePiecePointer(event) {
+  const drag = state.drag;
+  if (!drag || drag.pointerId !== event.pointerId) return;
+  const distance = Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY);
+  if (!drag.started && distance < 5) return;
+  window.clearTimeout(drag.timer);
+  startPieceDrag(drag, event.clientX, event.clientY);
+  event.preventDefault();
+  movePieceGhost(drag, event.clientX, event.clientY);
+  const hovered = document.elementFromPoint(event.clientX, event.clientY)?.closest(".square");
+  const nextTarget = hovered?.dataset.square || null;
+  if (drag.target !== nextTarget) {
+    drag.target = nextTarget;
+    renderBoard();
+  }
+}
+
+function clearPiecePointer(drag) {
+  window.clearTimeout(drag.timer);
+  drag.ghost?.remove();
+  squares.get(drag.from)?.classList.remove("piece-pressed");
+  state.drag = null;
+  renderBoard();
+}
+
+function endPiecePointer(event) {
+  const drag = state.drag;
+  if (!drag || drag.pointerId !== event.pointerId) return;
+  const moved = drag.started;
+  const hovered = moved
+    ? document.elementFromPoint(event.clientX, event.clientY)?.closest(".square")
+    : null;
+  const destination = hovered?.dataset.square || drag.from;
+  clearPiecePointer(drag);
+  if (!moved) return;
+  state.suppressClick = true;
+  window.setTimeout(() => { state.suppressClick = false; }, 0);
+  state.selected = drag.from;
+  void onSquareClick(destination);
+}
+
+function cancelPiecePointer(event) {
+  const drag = state.drag;
+  if (drag && drag.pointerId === event.pointerId) clearPiecePointer(drag);
+}
+
 function makeBoard() {
   for (let displayRow = 0; displayRow < 8; displayRow += 1) {
     for (let displayCol = 0; displayCol < 8; displayCol += 1) {
@@ -207,9 +378,13 @@ function makeBoard() {
       button.type = "button";
       button.className = "square";
       button.setAttribute("role", "gridcell");
-      button.addEventListener("click", () => onSquareClick(button.dataset.square));
-      button.addEventListener("dragover", (event) => event.preventDefault());
-      button.addEventListener("drop", onPieceDrop);
+      button.addEventListener("click", () => {
+        if (state.suppressClick) {
+          state.suppressClick = false;
+          return;
+        }
+        onSquareClick(button.dataset.square);
+      });
       const rank = document.createElement("span");
       rank.className = "coordinate rank";
       const file = document.createElement("span");
@@ -218,18 +393,18 @@ function makeBoard() {
       dot.className = "legal-dot";
       const piece = document.createElement("span");
       piece.className = "piece";
-      piece.addEventListener("dragstart", (event) => {
-        const name = button.dataset.square;
-        state.selected = name;
-        event.dataTransfer.setData("text/plain", name);
-        renderBoard();
-      });
-      button.append(rank, file, dot, piece);
+      const premoveNumber = document.createElement("span");
+      premoveNumber.className = "premove-number hidden";
+      button.append(rank, file, dot, piece, premoveNumber);
       gridSquares.set(`${displayRow},${displayCol}`, button);
-      squareParts.set(button, { rank, file, dot, piece });
+      squareParts.set(button, { rank, file, dot, piece, premoveNumber });
       boardElement.append(button);
     }
   }
+  boardElement.addEventListener("pointerdown", beginPiecePointer);
+  boardElement.addEventListener("pointermove", movePiecePointer, { passive: false });
+  boardElement.addEventListener("pointerup", endPiecePointer);
+  boardElement.addEventListener("pointercancel", cancelPiecePointer);
 }
 
 function setBoardOrientation() {
@@ -265,8 +440,29 @@ function setBoardOrientation() {
         square.classList.add("last-move");
       }
       if (state.selected === name) square.classList.add("selected");
-      if (state.premove?.from === name) square.classList.add("premove-from");
-      if (state.premove?.to === name) square.classList.add("premove-to");
+      if (state.drag?.from === name && !state.drag.started) {
+        square.classList.add("piece-pressed");
+      }
+      const premoveIndices = state.premoves
+        .map((move, index) => move.from === name ? index + 1 : null)
+        .filter((index) => index !== null);
+      if (premoveIndices.length) {
+        square.classList.add("premove-from");
+        square.setAttribute(
+          "aria-label",
+          `${pieceCode ? `${pieceCode[0] === "w" ? "White" : "Black"} ${pieceCode[1]}` : "Empty"} ${name}, premove ${premoveIndices.join(", ")}`,
+        );
+        parts.premoveNumber.textContent = String(premoveIndices[0]);
+        parts.premoveNumber.title = `Premove ${premoveIndices.join(", ")}`;
+        parts.premoveNumber.classList.remove("hidden");
+      } else {
+        parts.premoveNumber.textContent = "";
+        parts.premoveNumber.title = "";
+        parts.premoveNumber.classList.add("hidden");
+      }
+      if (state.premoves.some((move) => move.to === name)) square.classList.add("premove-to");
+      if (state.drag?.from === name) square.classList.add("drag-origin");
+      if (state.drag?.target === name && state.drag.from !== name) square.classList.add("drag-target");
       if (currentKing === name) square.classList.add("check");
       if (state.game.legalMoves.some((move) => move.from === state.selected && move.to === name)) {
         square.classList.add("capture-target");
@@ -281,9 +477,7 @@ function setBoardOrientation() {
       parts.piece.className = pieceCode
         ? `piece ${pieceCode[0] === "w" ? "white" : "black"}`
         : "piece";
-      parts.piece.draggable = Boolean(pieceCode) && !state.busy &&
-        !state.isSpectator && !state.game.over && state.game.status === "active" &&
-        pieceCode[0] === state.game.playerSide;
+      parts.piece.draggable = false;
     }
   }
 }
@@ -462,6 +656,9 @@ function renderTurn() {
         ? state.game.history.length === 0
           ? "White's clock starts when White makes the first move."
           : "Clock paused until both players are in the game."
+        : state.game.botElo !== null && state.game.botElo !== undefined &&
+          state.game.turn === "b"
+          ? "Stockfish is thinking."
         : state.game.playerSide !== state.game.turn
           ? "Waiting for your opponent. Select a piece and destination to premove."
           : state.game.check ? "King is in check." : "Select a piece to move.");
@@ -482,14 +679,35 @@ function render() {
     state.game.over || state.game.status !== "active" || state.busy;
   const closeRoomButton = document.querySelector("#close-room");
   closeRoomButton.disabled = state.game.over || state.busy ||
-    (state.game.status === "waiting" && state.game.playerSide !== "w");
+    (state.game.status === "waiting" && !state.game.canCloseWaitingRoom);
   document.querySelector("#new-game").disabled = !state.game.over || state.busy;
-  const waitingModal = document.querySelector("#waiting-modal");
-  waitingModal.classList.toggle(
-    "hidden",
-    state.isSpectator || state.game.status !== "waiting" || state.game.playerSide !== "w",
+  const roomNotice = document.querySelector("#room-notice");
+  const invitedPlayerWaiting = state.game.status === "waiting" &&
+    state.requiresAcceptance;
+  const creatorWaiting = state.game.status === "waiting" &&
+    state.game.canCloseWaitingRoom;
+  const showRoomNotice = !state.isSpectator &&
+    (invitedPlayerWaiting || creatorWaiting);
+  roomNotice.classList.toggle("hidden", !showRoomNotice);
+  roomNotice.classList.toggle(
+    "opponent-present",
+    showRoomNotice && state.game.opponentPresent,
   );
-  document.querySelector("#waiting-room-code").textContent = state.game.roomCode;
+  const noticeText = document.querySelector("#room-notice-text");
+  const noticeAction = document.querySelector("#room-notice-action");
+  if (invitedPlayerWaiting) {
+    const inviterName = state.game.playerSide === "w"
+      ? state.game.blackName : state.game.whiteName;
+    noticeText.textContent = state.game.opponentPresent
+      ? `${inviterName} is here. Join their game when you’re ready.`
+      : `${inviterName} invited you to play. Join when you’re ready.`;
+    noticeAction.textContent = "Join game";
+  } else if (creatorWaiting) {
+    noticeText.textContent = state.game.opponentPresent
+      ? "Your opponent is here and ready to join."
+      : `Waiting for your opponent to join room ${state.game.roomCode}.`;
+    noticeAction.textContent = "Back to lobby";
+  }
   const rematchModal = document.querySelector("#rematch-modal");
   const rematchRequestedBy = state.game.rematchRequestedBy;
   const isRematchRequester = rematchRequestedBy === state.game.playerSide;
@@ -544,13 +762,14 @@ async function updateGame(next, animate = false) {
   const previousPly = state.game?.history.length || 0;
   if (next.over || next.status !== "active" ||
       next.history.length < previousHistory.length) {
-    state.premove = null;
+    state.premoves = [];
     state.selected = null;
   }
   const highlightedGrade = state.game
     ? newlyHighlightedGrade(previousHistory, next.history)
     : null;
   state.game = next;
+  state.requiresAcceptance = Boolean(next.requiresAcceptance);
   state.clockSyncAt = Date.now();
   if (animate && next.history.length > previousPly) {
     state.animatedPly = next.history.length;
@@ -563,13 +782,14 @@ async function updateGame(next, animate = false) {
   render();
   if (highlightedGrade) showGradePopup(highlightedGrade);
   if (animate && next.lastMove?.captured && next.lastMove !== oldLastMove) animateCapture();
-  if (state.premove && next.status === "active" && !next.over &&
+  if (state.premoves.length && next.status === "active" && !next.over &&
       next.playerSide === next.turn) {
-    const premove = state.premove;
-    state.premove = null;
+    const premove = state.premoves.shift();
     state.selected = null;
+    renderBoard();
     void sendMove(premove.from, premove.to, premove.promotion, true);
   }
+  void playBotMove();
 }
 
 async function sendMove(from, to, promotion, isPremove = false) {
@@ -593,10 +813,12 @@ async function sendMove(from, to, promotion, isPremove = false) {
     state.busy = false;
     renderBoard();
     document.querySelector("#forfeit-game").disabled = state.game.over;
+    void playBotMove();
   }
 }
 
 function queuePremove(from, to) {
+  if (state.game.botElo !== null && state.game.botElo !== undefined) return false;
   if (from === to) return false;
   const fromCoords = squareCoords(from);
   const toCoords = squareCoords(to);
@@ -607,9 +829,9 @@ function queuePremove(from, to) {
   }
   const promotionRank = state.game.playerSide === "w" ? "8" : "1";
   const promotion = piece[1] === "p" && to[1] === promotionRank ? "q" : undefined;
-  state.premove = { from, to, promotion };
+  state.premoves.push({ from, to, promotion });
   state.selected = null;
-  showToast("Premove queued. Click its piece to cancel, or choose another move.");
+  showToast(`Premove ${state.premoves.length} queued. Select a numbered piece to cancel it.`);
   renderBoard();
   return true;
 }
@@ -620,15 +842,15 @@ async function onSquareClick(name) {
   const isOurTurn = state.game.playerSide === state.game.turn;
   if (!isOurTurn) {
     const piece = state.game.board[squareCoords(name).row][squareCoords(name).col];
-    if (state.premove?.from === name) {
-      state.premove = null;
+    const queuedIndex = state.premoves.findIndex((move) => move.from === name);
+    if (queuedIndex !== -1) {
+      state.premoves.splice(queuedIndex, 1);
       state.selected = null;
-      showToast("Premove cancelled.");
+      showToast(`Premove cancelled. ${state.premoves.length} remain queued.`);
       renderBoard();
       return;
     }
     if (piece?.[0] === state.game.playerSide) {
-      state.premove = null;
       state.selected = name;
       renderBoard();
       return;
@@ -663,21 +885,6 @@ async function onSquareClick(name) {
   if (moves.some((move) => move.promotion)) promotion = await choosePromotion(state.game.turn);
   if (!promotion && moves.some((move) => move.promotion)) return;
   await sendMove(state.selected, name, promotion);
-}
-
-function onPieceDrop(event) {
-  event.preventDefault();
-  const from = event.dataTransfer.getData("text/plain");
-  const to = event.currentTarget.dataset.square;
-  if (from && to) {
-    if (!state.isSpectator && state.game?.playerSide !== state.game?.turn) {
-      if (queuePremove(from, to)) return;
-      showToast("Choose one of your pieces and a different destination.");
-      return;
-    }
-    state.selected = from;
-    onSquareClick(to);
-  }
 }
 
 function choosePromotion(color) {
@@ -719,6 +926,17 @@ function openEloModal(result) {
 async function newGame() {
   if (!state.game?.over) return;
   try {
+    if (state.game.botElo !== null && state.game.botElo !== undefined) {
+      const next = await api("/api/bot-games", {
+        method: "POST",
+        body: JSON.stringify({
+          botElo: state.game.botElo,
+          timeControl: state.game.timeControlKey,
+        }),
+      });
+      window.location.href = `/play?room=${encodeURIComponent(next.roomCode)}`;
+      return;
+    }
     const next = await api(roomApiPath("/new-game"), { method: "POST", body: "{}" });
     document.querySelector("#elo-modal").classList.add("hidden");
     await updateGame(next);
@@ -846,6 +1064,25 @@ document.querySelector("#decline-rematch").addEventListener("click", () => {
 });
 document.querySelector("#forfeit-game").addEventListener("click", forfeitGame);
 document.querySelector("#close-room").addEventListener("click", closeRoom);
+document.querySelector("#room-notice-action").addEventListener("click", async () => {
+  const action = document.querySelector("#room-notice-action");
+  if (!state.game) return;
+  if (!state.requiresAcceptance) {
+    window.location.href = "/";
+    return;
+  }
+  action.disabled = true;
+  try {
+    const joined = await api(roomApiPath("/join"), {
+      method: "POST",
+      body: "{}",
+    });
+    await updateGame(joined);
+  } catch (error) {
+    showToast(error.message);
+    action.disabled = false;
+  }
+});
 document.querySelector("#flip-board").addEventListener("click", () => {
   state.flipped = !state.flipped;
   renderBoard();
@@ -863,17 +1100,6 @@ document.querySelector("#close-modal").addEventListener("click", () => {
   document.querySelector("#elo-modal").classList.add("hidden");
 });
 
-function confirmInvitation() {
-  const modal = document.querySelector("#invitation-modal");
-  modal.classList.remove("hidden");
-  return new Promise((resolve) => {
-    document.querySelector("#accept-invitation").addEventListener("click", () => {
-      modal.classList.add("hidden");
-      resolve(true);
-    }, { once: true });
-  });
-}
-
 async function loadInitialGame() {
   let initial;
   if (state.isSpectator) {
@@ -886,10 +1112,6 @@ async function loadInitialGame() {
     initial = await api(roomApiPath());
   } catch (error) {
     if (error.status !== 403) throw error;
-    initial = await api(roomApiPath("/join"), { method: "POST", body: "{}" });
-  }
-  if (initial.requiresAcceptance) {
-    if (!await confirmInvitation()) return;
     initial = await api(roomApiPath("/join"), { method: "POST", body: "{}" });
   }
   state.startedAt = Date.now();
@@ -921,6 +1143,8 @@ async function pollGameState() {
       const next = await api(roomApiPath(state.isSpectator ? "/spectate" : ""));
       if (next.history.length !== state.game.history.length ||
           next.status !== state.game.status || next.result !== state.game.result ||
+          next.opponentPresent !== state.game.opponentPresent ||
+          Boolean(next.requiresAcceptance) !== state.requiresAcceptance ||
           next.clockStartedAt !== state.game.clockStartedAt ||
           next.rematchRequestedBy !== state.game.rematchRequestedBy ||
           JSON.stringify(next.ratingChanges) !== JSON.stringify(state.game.ratingChanges) ||
@@ -937,7 +1161,7 @@ async function pollGameState() {
   } catch (error) {
     showToast(error.message);
   } finally {
-    const pollDelay = state.premove ? 400 : 1000;
+    const pollDelay = state.premoves.length ? 400 : 1000;
     window.setTimeout(pollGameState, pollDelay);
   }
 }

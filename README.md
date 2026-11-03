@@ -30,9 +30,12 @@ The lobby displays the top 10 accounts by Elo. Select a player to view their
 rating, account age, match record, and recent completed games, or send a friend
 request.
 
-Friend invitations open the new room for the sender while the invited player
-accepts. The community tabs also list active live matches; choose **Spectate**
-to watch a game without joining it or affecting either player's clock.
+Friend invitations stay in the lobby after they are sent, so you can keep
+using the site while your friend decides when to join. The room remains in
+**Your games**, where you can return to it or close it. Invitation colors are
+randomly assigned. The community tabs also list active live matches; choose
+**Spectate** to watch a game without joining it or affecting either player's
+clock.
 
 Usernames must be 3–20 letters, numbers, or underscores. Passwords must be at
 least 10 characters. Friend requests must be accepted before either player can
@@ -60,6 +63,14 @@ and analysis uses the player's device. Stockfish.js is GPL-3.0; its license
 and authors are in `public/engine/Copying.txt` and `public/engine/AUTHORS.txt`.
 The corresponding source is available at
 [Stockfish.js v19.0.1](https://github.com/nmrugg/stockfish.js/tree/v19.0.1).
+
+You can also play against browser-based Stockfish opponents at approximately
+200 or 1000 Elo, or against Karti at approximately 1600 Elo. These strengths
+are approximations, and bot games do not change account ratings. During a
+friend invitation, the lobby reports when the invited player is present and
+offers a shortcut back to the waiting room. The board supports animated
+click-and-drag moves and a numbered queue of premoves that can be cancelled
+individually.
 
 ## Host on the internet
 
