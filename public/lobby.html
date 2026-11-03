@@ -64,16 +64,38 @@
         </form>
       </div>
       <div class="bot-play">
-        <label for="bot-opponent">Play against Stockfish
-          <select id="bot-opponent">
-            <option value="200">Beginner · approximately 200 Elo</option>
-            <option value="1000">Intermediate · approximately 1000 Elo</option>
-            <option value="1600">Karti · approximately 1600 Elo</option>
-          </select>
-        </label>
-        <button id="play-bot" class="button" type="button">Play a bot</button>
+        <div class="bot-picker-heading">
+          <span class="eyebrow">OPPONENT</span>
+          <h3>Choose your opponent</h3>
+        </div>
+        <div class="bot-options" role="radiogroup" aria-label="Choose your opponent">
+          <label class="bot-option">
+            <input type="radio" name="bot-opponent" value="200" checked>
+            <span class="bot-option-card">
+              <span class="bot-avatar" aria-hidden="true">♟</span>
+              <span class="bot-option-name">Beginner</span>
+              <span class="bot-option-rating">200 Elo</span>
+            </span>
+          </label>
+          <label class="bot-option">
+            <input type="radio" name="bot-opponent" value="1000">
+            <span class="bot-option-card">
+              <span class="bot-avatar" aria-hidden="true">♞</span>
+              <span class="bot-option-name">Intermediate</span>
+              <span class="bot-option-rating">1000 Elo</span>
+            </span>
+          </label>
+          <label class="bot-option">
+            <input type="radio" name="bot-opponent" value="1600">
+            <span class="bot-option-card">
+              <span class="bot-avatar" aria-hidden="true">♛</span>
+              <span class="bot-option-name">Karti</span>
+              <span class="bot-option-rating">1600 Elo</span>
+            </span>
+          </label>
+        </div>
+        <button id="play-bot" class="button primary" type="button">Play this bot</button>
       </div>
-      <p class="hint">Bot strengths are approximate. Bot games do not affect account ratings.</p>
       <p class="hint">Choose a clock for both players. No account is needed to play in a room.</p>
     </section>
 

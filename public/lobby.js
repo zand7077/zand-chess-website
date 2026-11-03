@@ -508,7 +508,7 @@ document.querySelector("#play-bot").addEventListener("click", async (event) => {
     const game = await api("/api/bot-games", {
       method: "POST",
       body: JSON.stringify({
-        botElo: Number(document.querySelector("#bot-opponent").value),
+        botElo: Number(document.querySelector('input[name="bot-opponent"]:checked').value),
         timeControl: document.querySelector("#time-control").value,
       }),
     });
