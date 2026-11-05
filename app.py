@@ -286,6 +286,26 @@ def initialize_database(backend: str, config: dict[str, Any]) -> None:
                     status TEXT NOT NULL CHECK(status IN ('waiting', 'active', 'completed')),
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
+                CREATE TABLE IF NOT EXISTS global_chat_messages (
+                    id INTEGER PRIMARY KEY,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    message TEXT NOT NULL,
+                    created_at_ms INTEGER NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS room_chat_messages (
+                    id INTEGER PRIMARY KEY,
+                    room_code TEXT NOT NULL REFERENCES games(room_code) ON DELETE CASCADE,
+                    side TEXT NOT NULL CHECK(side IN ('w', 'b')),
+                    author_name TEXT NOT NULL,
+                    message TEXT NOT NULL,
+                    created_at_ms INTEGER NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS room_chat_typing (
+                    room_code TEXT NOT NULL REFERENCES games(room_code) ON DELETE CASCADE,
+                    side TEXT NOT NULL CHECK(side IN ('w', 'b')),
+                    typing_until_ms INTEGER NOT NULL,
+                    PRIMARY KEY(room_code, side)
+                );
                 """
             )
             user_columns = {
@@ -328,6 +348,14 @@ def initialize_database(backend: str, config: dict[str, Any]) -> None:
                 connection.execute(
                     f"CREATE INDEX IF NOT EXISTS {name} ON games ({columns})"
                 )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS global_chat_created "
+                "ON global_chat_messages (created_at_ms DESC, id DESC)"
+            )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS room_chat_room_created "
+                "ON room_chat_messages (room_code, id DESC)"
+            )
         finally:
             connection.close()
         return
@@ -390,6 +418,32 @@ def initialize_database(backend: str, config: dict[str, Any]) -> None:
                 created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
             """,
+            """
+            CREATE TABLE IF NOT EXISTS global_chat_messages (
+                id BIGSERIAL PRIMARY KEY,
+                user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                message VARCHAR(280) NOT NULL,
+                created_at_ms BIGINT NOT NULL
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS room_chat_messages (
+                id BIGSERIAL PRIMARY KEY,
+                room_code VARCHAR(8) NOT NULL REFERENCES games(room_code) ON DELETE CASCADE,
+                side VARCHAR(1) NOT NULL CHECK(side IN ('w', 'b')),
+                author_name VARCHAR(20) NOT NULL,
+                message VARCHAR(280) NOT NULL,
+                created_at_ms BIGINT NOT NULL
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS room_chat_typing (
+                room_code VARCHAR(8) NOT NULL REFERENCES games(room_code) ON DELETE CASCADE,
+                side VARCHAR(1) NOT NULL CHECK(side IN ('w', 'b')),
+                typing_until_ms BIGINT NOT NULL,
+                PRIMARY KEY(room_code, side)
+            )
+            """,
             "CREATE UNIQUE INDEX IF NOT EXISTS users_username_lower_unique ON users (LOWER(username))",
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS rating INTEGER NOT NULL DEFAULT 800",
             "ALTER TABLE games ADD COLUMN IF NOT EXISTS rating_changes_json TEXT",
@@ -402,6 +456,8 @@ def initialize_database(backend: str, config: dict[str, Any]) -> None:
             "CREATE INDEX IF NOT EXISTS games_black_user_status_created ON games (black_user_id, status, created_at DESC, id DESC)",
             "CREATE INDEX IF NOT EXISTS games_status_created ON games (status, created_at DESC)",
             "CREATE INDEX IF NOT EXISTS games_invited_status_created ON games (invited_user_id, status, created_at DESC)",
+            "CREATE INDEX IF NOT EXISTS global_chat_created ON global_chat_messages (created_at_ms DESC, id DESC)",
+            "CREATE INDEX IF NOT EXISTS room_chat_room_created ON room_chat_messages (room_code, id DESC)",
         )
         try:
             for statement in schema:
@@ -473,6 +529,37 @@ def initialize_database(backend: str, config: dict[str, Any]) -> None:
             FOREIGN KEY (invited_user_id) REFERENCES users(id) ON DELETE SET NULL
         )
         """,
+        """
+        CREATE TABLE IF NOT EXISTS global_chat_messages (
+            id BIGINT AUTO_INCREMENT PRIMARY KEY,
+            user_id BIGINT NOT NULL,
+            message VARCHAR(280) NOT NULL,
+            created_at_ms BIGINT NOT NULL,
+            KEY global_chat_created (created_at_ms, id),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS room_chat_messages (
+            id BIGINT AUTO_INCREMENT PRIMARY KEY,
+            room_code VARCHAR(8) NOT NULL,
+            side VARCHAR(1) NOT NULL,
+            author_name VARCHAR(20) NOT NULL,
+            message VARCHAR(280) NOT NULL,
+            created_at_ms BIGINT NOT NULL,
+            KEY room_chat_room_created (room_code, id),
+            FOREIGN KEY (room_code) REFERENCES games(room_code) ON DELETE CASCADE
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS room_chat_typing (
+            room_code VARCHAR(8) NOT NULL,
+            side VARCHAR(1) NOT NULL,
+            typing_until_ms BIGINT NOT NULL,
+            PRIMARY KEY(room_code, side),
+            FOREIGN KEY (room_code) REFERENCES games(room_code) ON DELETE CASCADE
+        )
+        """,
     )
     try:
         for statement in schema:
@@ -514,6 +601,22 @@ def initialize_database(backend: str, config: dict[str, Any]) -> None:
         ):
             if name not in existing_indexes:
                 connection.execute(f"CREATE INDEX {name} ON games ({columns})")
+        if backend == "mysql":
+            chat_indexes = {
+                row["Key_name"]
+                for table in ("global_chat_messages", "room_chat_messages")
+                for row in connection.execute(f"SHOW INDEX FROM {table}").fetchall()
+            }
+            if "global_chat_created" not in chat_indexes:
+                connection.execute(
+                    "CREATE INDEX global_chat_created "
+                    "ON global_chat_messages (created_at_ms, id)"
+                )
+            if "room_chat_room_created" not in chat_indexes:
+                connection.execute(
+                    "CREATE INDEX room_chat_room_created "
+                    "ON room_chat_messages (room_code, id)"
+                )
         connection.commit()
     finally:
         connection.close()
@@ -616,6 +719,68 @@ def live_matches():
         }
         for match in matches
     ])
+
+
+@bp.get("/api/global-chat")
+def get_global_chat():
+    user = current_user()
+    user_id = user["id"] if user is not None else -1
+    messages = database().execute(
+        """
+        SELECT m.id, m.user_id, u.username, m.message, m.created_at_ms,
+            f.user_one AS friend_user_one,
+            sent.id AS sent_request_id,
+            received.id AS received_request_id
+        FROM global_chat_messages m
+        JOIN users u ON u.id = m.user_id
+        LEFT JOIN friendships f ON
+            (f.user_one = ? AND f.user_two = m.user_id)
+            OR (f.user_two = ? AND f.user_one = m.user_id)
+        LEFT JOIN friend_requests sent
+            ON sent.sender_id = ? AND sent.receiver_id = m.user_id
+        LEFT JOIN friend_requests received
+            ON received.sender_id = m.user_id AND received.receiver_id = ?
+        ORDER BY m.created_at_ms DESC, m.id DESC
+        LIMIT 50
+        """,
+        (user_id, user_id, user_id, user_id),
+    ).fetchall()
+    return jsonify(messages=[
+        {
+            "id": row["id"],
+            "userId": row["user_id"],
+            "username": row["username"],
+            "message": row["message"],
+            "createdAt": row["created_at_ms"],
+            "own": user is not None and row["user_id"] == user["id"],
+            "isFriend": row["friend_user_one"] is not None,
+            "sentRequestId": row["sent_request_id"],
+            "receivedRequestId": row["received_request_id"],
+        }
+        for row in reversed(messages)
+    ])
+
+
+@bp.post("/api/global-chat")
+def post_global_chat():
+    user = require_user()
+    if user is None:
+        return error("Sign in to join the global chat.", 401)
+    message = json_body().get("message")
+    if not isinstance(message, str):
+        return error("Enter a chat message.")
+    message = message.strip()
+    if not message or len(message) > 280:
+        return error("Chat messages must be between 1 and 280 characters.")
+    database().execute(
+        """
+        INSERT INTO global_chat_messages(user_id, message, created_at_ms)
+        VALUES (?, ?, ?)
+        """,
+        (user["id"], message, int(time.time() * 1000)),
+    )
+    database().commit()
+    return jsonify(ok=True), 201
 
 
 @bp.get("/api/leaderboard")
@@ -1458,6 +1623,110 @@ def authorized_room(code: str):
     if side is None:
         return room, None, error("You are not a player in this room.", 403)
     return room, side, None
+
+
+@bp.get("/api/rooms/<code>/chat")
+def get_room_chat(code: str):
+    room, side, failure = authorized_room(code)
+    if failure is not None:
+        return failure
+    connection = database()
+    messages = connection.execute(
+        """
+        SELECT id, side, author_name, message, created_at_ms
+        FROM room_chat_messages WHERE room_code = ?
+        ORDER BY id DESC LIMIT 100
+        """,
+        (room["room_code"],),
+    ).fetchall()
+    typing_rows = connection.execute(
+        """
+        SELECT side FROM room_chat_typing
+        WHERE room_code = ? AND typing_until_ms > ?
+        """,
+        (room["room_code"], int(time.time() * 1000)),
+    ).fetchall()
+    return jsonify(
+        playerSide=side,
+        messages=[
+            {
+                "id": row["id"],
+                "side": row["side"],
+                "authorName": row["author_name"],
+                "message": row["message"],
+                "createdAt": row["created_at_ms"],
+            }
+            for row in reversed(messages)
+        ],
+        typing={row["side"]: True for row in typing_rows},
+    )
+
+
+@bp.post("/api/rooms/<code>/chat")
+def post_room_chat(code: str):
+    room, side, failure = authorized_room(code)
+    if failure is not None:
+        return failure
+    message = json_body().get("message")
+    if not isinstance(message, str):
+        return error("Enter a chat message.")
+    message = message.strip()
+    if not message or len(message) > 280:
+        return error("Chat messages must be between 1 and 280 characters.")
+    author_name = room["white_name"] if side == "w" else room["black_name"]
+    if not author_name:
+        author_name = "White" if side == "w" else "Black"
+    connection = database()
+    connection.execute(
+        """
+        INSERT INTO room_chat_messages(
+            room_code, side, author_name, message, created_at_ms
+        ) VALUES (?, ?, ?, ?, ?)
+        """,
+        (
+            room["room_code"], side, author_name, message,
+            int(time.time() * 1000),
+        ),
+    )
+    connection.execute(
+        "DELETE FROM room_chat_typing WHERE room_code = ? AND side = ?",
+        (room["room_code"], side),
+    )
+    connection.commit()
+    return jsonify(ok=True), 201
+
+
+@bp.post("/api/rooms/<code>/chat/typing")
+def update_room_chat_typing(code: str):
+    room, side, failure = authorized_room(code)
+    if failure is not None:
+        return failure
+    is_typing = json_body().get("isTyping")
+    if not isinstance(is_typing, bool):
+        return error("Choose whether you are typing.")
+    connection = database()
+    if is_typing:
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO room_chat_typing(room_code, side, typing_until_ms)
+            VALUES (?, ?, ?)
+            """,
+            (room["room_code"], side, int(time.time() * 1000) + 3000),
+        )
+        connection.execute(
+            """
+            UPDATE room_chat_typing SET typing_until_ms = ?
+            WHERE room_code = ? AND side = ?
+            """,
+            (int(time.time() * 1000) + 3000, room["room_code"], side),
+        )
+    else:
+        connection.execute(
+            "DELETE FROM room_chat_typing WHERE room_code = ? AND side = ?",
+            (room["room_code"], side),
+        )
+    connection.commit()
+    return jsonify(ok=True)
 
 
 @bp.post("/api/rooms/<code>/join")

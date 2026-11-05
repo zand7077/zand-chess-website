@@ -14,8 +14,13 @@
       <a class="brand" href="/" aria-label="Chess home"><span class="brand-mark">♜</span>
         <span class="brand-copy"><b>CHESS</b><small>PLAY TOGETHER</small></span>
       </a>
-      <button id="logout-button" class="button quiet hidden" type="button">Sign out</button>
+      <div class="header-actions">
+        <button id="global-chat-toggle" class="button quiet" type="button"
+          aria-controls="global-chat-panel" aria-pressed="false">Global chat</button>
+        <button id="logout-button" class="button quiet hidden" type="button">Sign out</button>
+      </div>
     </header>
+    <div id="home-content">
     <aside id="opponent-notification" class="opponent-notification hidden" role="status" aria-live="polite">
       <span id="opponent-notification-text"></span>
       <a id="opponent-notification-join" class="button primary" href="/">Join game</a>
@@ -147,6 +152,33 @@
     </section>
     <p id="message" class="message" role="status" aria-live="polite"></p>
     <footer>Game reviews powered by Stockfish 19 Lite.</footer>
+    </div>
+    <section id="global-chat-panel" class="global-chat-panel hidden"
+      aria-labelledby="global-chat-title">
+      <div class="section-title global-chat-heading">
+        <div><span class="eyebrow">THE CHESS COMMUNITY</span><h1 id="global-chat-title">Global chat</h1></div>
+        <span class="muted">Chat with players and find your next opponent</span>
+      </div>
+      <div id="global-chat-messages" class="global-chat-messages"
+        role="log" aria-live="polite" aria-relevant="additions text">
+        <p class="muted">Loading chat…</p>
+      </div>
+      <div class="global-chat-composer">
+        <div class="global-chat-composer-heading">
+          <label for="global-chat-input">Write a message</label>
+          <span>Public · up to 280 characters</span>
+        </div>
+        <form id="global-chat-form" class="global-chat-form hidden">
+          <input id="global-chat-input" maxlength="280" autocomplete="off"
+            placeholder="Say hello or request a game…" required>
+          <button id="global-chat-send" class="button primary" type="submit">Send</button>
+        </form>
+        <p id="global-chat-login" class="global-chat-login hidden">
+          <button id="global-chat-sign-in" class="text-button" type="button">Sign in to chat, add players, and send game invitations.</button>
+        </p>
+        <p id="global-chat-status" class="global-chat-status" role="status" aria-live="polite"></p>
+      </div>
+    </section>
   </main>
   <div id="profile-modal" class="profile-modal hidden" role="dialog" aria-modal="true" aria-labelledby="profile-name">
     <section class="profile-card">

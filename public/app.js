@@ -40,6 +40,13 @@ const state = {
   animatedPly: 0,
   gradeAnimationPlayedPly: 0,
   lowTimeWarningActive: false,
+  chatMessages: [],
+  chatTyping: {},
+  chatPlayerSide: null,
+  chatBubbleKey: { w: "", b: "" },
+  chatMessageKey: "",
+  chatPollTimer: null,
+  lastTypingSentAt: 0,
 };
 const squares = new Map();
 const gridSquares = new Map();
@@ -666,12 +673,118 @@ function renderTurn() {
   document.querySelector("#check-banner").classList.toggle("hidden", !state.game.check || state.game.over);
 }
 
+function renderChatBubbles() {
+  for (const side of ["w", "b"]) {
+    const bubble = document.querySelector(`#${side === "w" ? "white" : "black"}-chat-bubble`);
+    const typing = Boolean(state.chatTyping[side]);
+    const latest = [...state.chatMessages].reverse().find((entry) => entry.side === side);
+    const key = typing ? `typing:${side}` : latest ? `message:${latest.id}` : "";
+    if (state.chatBubbleKey[side] === key) continue;
+    state.chatBubbleKey[side] = key;
+    bubble.classList.remove("typing");
+    bubble.replaceChildren();
+    if (typing) {
+      bubble.classList.add("typing");
+      bubble.setAttribute("aria-label", `${side === (state.chatPlayerSide || state.game.playerSide) ? "You are" : "Your opponent is"} typing`);
+      const label = document.createElement("span");
+      label.textContent = "Typing";
+      const dots = document.createElement("span");
+      dots.className = "typing-dots";
+      dots.setAttribute("aria-hidden", "true");
+      for (let index = 0; index < 3; index += 1) dots.append(document.createElement("i"));
+      bubble.append(label, dots);
+      bubble.classList.remove("hidden");
+    } else if (latest) {
+      bubble.textContent = latest.message;
+      bubble.title = latest.authorName;
+      bubble.setAttribute("aria-label", `${latest.authorName} said: ${latest.message}`);
+      bubble.classList.remove("hidden");
+    } else {
+      bubble.classList.add("hidden");
+    }
+  }
+}
+
+function renderChatLog() {
+  const key = state.chatMessages.map((entry) => entry.id).join(",");
+  if (state.chatMessageKey === key) return;
+  state.chatMessageKey = key;
+  const container = document.querySelector("#chat-messages");
+  const wasNearBottom =
+    container.scrollHeight - container.scrollTop - container.clientHeight < 48;
+  container.replaceChildren();
+  if (!state.chatMessages.length) {
+    const empty = document.createElement("p");
+    empty.className = "empty-history";
+    empty.textContent = "Say hello to your opponent.";
+    container.append(empty);
+    return;
+  }
+  for (const entry of state.chatMessages) {
+    const message = document.createElement("article");
+    const isOwnMessage = entry.side === (state.chatPlayerSide || state.game.playerSide);
+    message.className = `chat-entry${isOwnMessage ? " own" : ""}`;
+    const author = document.createElement("strong");
+    author.textContent = isOwnMessage ? "You" : entry.authorName;
+    const body = document.createElement("p");
+    body.textContent = entry.message;
+    const sentAt = document.createElement("time");
+    sentAt.dateTime = new Date(entry.createdAt).toISOString();
+    sentAt.textContent = new Date(entry.createdAt).toLocaleTimeString([], {
+      hour: "numeric",
+      minute: "2-digit",
+    });
+    message.append(author, body, sentAt);
+    container.append(message);
+  }
+  if (wasNearBottom) container.scrollTop = container.scrollHeight;
+}
+
+async function pollRoomChat() {
+  if (!state.roomCode || state.isSpectator) return;
+  try {
+    const result = await api(roomApiPath("/chat"));
+    state.chatMessages = result.messages;
+    state.chatTyping = result.typing;
+    state.chatPlayerSide = result.playerSide;
+    renderChatLog();
+    renderChatBubbles();
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    if (state.chatPollTimer) window.clearTimeout(state.chatPollTimer);
+    if (!state.isSpectator && state.roomCode) {
+      state.chatPollTimer = window.setTimeout(pollRoomChat, 1000);
+    }
+  }
+}
+
+async function setRoomTyping(isTyping) {
+  try {
+    await api(roomApiPath("/chat/typing"), {
+      method: "POST",
+      body: JSON.stringify({ isTyping }),
+    });
+  } catch (error) {
+    showToast(error.message);
+  }
+}
+
 function render() {
   if (!state.game) return;
   document.querySelector("#spectator-banner").classList.toggle("hidden", !state.isSpectator);
+  document.querySelector("#chat-panel").classList.toggle("hidden", state.isSpectator);
+  const quickChatButton = document.querySelector("#open-quick-chat");
+  quickChatButton.classList.toggle("hidden", state.isSpectator);
+  if (state.isSpectator) {
+    document.querySelector("#chat-panel").classList.remove("mobile-chat-open");
+    quickChatButton.setAttribute("aria-expanded", "false");
+    quickChatButton.innerHTML = '<span aria-hidden="true">▰</span> Chat';
+  }
   document.querySelector(".action-row").classList.toggle("hidden", state.isSpectator);
   renderBoard();
   renderTurn();
+  renderChatBubbles();
   renderHistory();
   renderCaptured();
   renderEvaluation();
@@ -1116,11 +1229,69 @@ async function loadInitialGame() {
   }
   state.startedAt = Date.now();
   await updateGame(initial);
+  if (!state.isSpectator) void pollRoomChat();
 }
 
 document.querySelector("#elo-modal").addEventListener("click", (event) => {
   if (event.target.id === "elo-modal") event.currentTarget.classList.add("hidden");
 });
+document.querySelector("#chat-input").addEventListener("input", (event) => {
+  const input = event.currentTarget;
+  if (!input.value.trim()) return;
+  const now = Date.now();
+  if (now - state.lastTypingSentAt < 1000) return;
+  state.lastTypingSentAt = now;
+  void setRoomTyping(true);
+});
+document.querySelector("#chat-input").addEventListener("blur", () => {
+  void setRoomTyping(false);
+  state.lastTypingSentAt = 0;
+});
+async function sendRoomChatMessage(message) {
+  const input = document.querySelector("#chat-input");
+  const sendButton = document.querySelector("#chat-send");
+  const trimmedMessage = message.trim();
+  if (!trimmedMessage) return;
+  sendButton.disabled = true;
+  try {
+    await api(roomApiPath("/chat"), {
+      method: "POST",
+      body: JSON.stringify({ message: trimmedMessage }),
+    });
+    if (input.value.trim() === trimmedMessage) input.value = "";
+    state.lastTypingSentAt = 0;
+    void setRoomTyping(false);
+    await pollRoomChat();
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    sendButton.disabled = false;
+  }
+}
+document.querySelector("#chat-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  await sendRoomChatMessage(document.querySelector("#chat-input").value);
+});
+document.querySelector("#open-quick-chat").addEventListener("click", (event) => {
+  const panel = document.querySelector("#chat-panel");
+  const isOpening = panel.classList.toggle("mobile-chat-open");
+  event.currentTarget.setAttribute("aria-expanded", String(isOpening));
+  event.currentTarget.innerHTML = isOpening
+    ? '<span aria-hidden="true">×</span> Close'
+    : '<span aria-hidden="true">▰</span> Chat';
+  if (isOpening) document.querySelector("#chat-input").focus();
+});
+document.querySelector("#close-quick-chat").addEventListener("click", () => {
+  document.querySelector("#chat-panel").classList.remove("mobile-chat-open");
+  const button = document.querySelector("#open-quick-chat");
+  button.setAttribute("aria-expanded", "false");
+  button.innerHTML = '<span aria-hidden="true">▰</span> Chat';
+});
+for (const quickMessage of document.querySelectorAll(".quick-message-button")) {
+  quickMessage.addEventListener("click", () => {
+    void sendRoomChatMessage(quickMessage.dataset.message || "");
+  });
+}
 window.addEventListener("pagehide", () => {
   if (state.isSpectator || !state.roomCode || !state.game || state.game.status === "completed") return;
   const body = new Blob(["{}"], { type: "application/json" });

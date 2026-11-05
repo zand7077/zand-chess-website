@@ -37,6 +37,13 @@ randomly assigned. The community tabs also list active live matches; choose
 **Spectate** to watch a game without joining it or affecting either player's
 clock.
 
+Open **Global chat** from the lobby header to talk with other players. Chat is
+readable without an account; sign in to post, add a player as a friend, or send
+them a game invitation from their message. Game rooms also include a private
+chat log with animated typing indicators and speech bubbles above each
+player's avatar. On phones, use the floating **Chat** button to open the game
+chat without scrolling; one-tap quick messages are available there as well.
+
 Usernames must be 3–20 letters, numbers, or underscores. Passwords must be at
 least 10 characters. Friend requests must be accepted before either player can
 send a friend invitation. New accounts start at 800 Elo. For games between two

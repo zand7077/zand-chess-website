@@ -8,6 +8,8 @@ let isRegistering = false;
 let signedInUser = null;
 let friendIds = new Set();
 let dashboardTimer = null;
+let globalChatTimer = null;
+let globalChatKey = "";
 let inviteUrl = "";
 let inviteTimeResolver = null;
 const notifiedInvitationCodes = new Set();
@@ -282,6 +284,119 @@ async function openPlayerProfile(userId) {
   document.querySelector("#profile-modal").classList.remove("hidden");
 }
 
+function globalChatStatus(text) {
+  document.querySelector("#global-chat-status").textContent = text;
+}
+
+function globalChatAction(text, action, disabled = false, primary = false) {
+  const control = button(text, action, primary);
+  control.disabled = disabled;
+  return control;
+}
+
+function renderGlobalChat(messages) {
+  const container = document.querySelector("#global-chat-messages");
+  const key = JSON.stringify(messages);
+  if (globalChatKey === key) return;
+  globalChatKey = key;
+  const wasNearBottom =
+    container.scrollHeight - container.scrollTop - container.clientHeight < 64;
+  container.replaceChildren();
+  if (!messages.length) {
+    const empty = document.createElement("p");
+    empty.className = "muted";
+    empty.textContent = "No messages yet. Start the conversation.";
+    container.append(empty);
+    return;
+  }
+  for (const chatMessage of messages) {
+    const entry = document.createElement("article");
+    entry.className = `global-chat-entry${chatMessage.own ? " own" : ""}`;
+    const copy = document.createElement("div");
+    copy.className = "global-chat-copy";
+    const author = document.createElement("strong");
+    author.textContent = chatMessage.own ? "You" : chatMessage.username;
+    const body = document.createElement("p");
+    body.textContent = chatMessage.message;
+    const sentAt = document.createElement("time");
+    sentAt.dateTime = new Date(chatMessage.createdAt).toISOString();
+    sentAt.textContent = new Date(chatMessage.createdAt).toLocaleTimeString([], {
+      hour: "numeric",
+      minute: "2-digit",
+    });
+    copy.append(author, body, sentAt);
+    entry.append(copy);
+
+    if (!chatMessage.own && signedInUser) {
+      const actions = document.createElement("div");
+      actions.className = "global-chat-actions";
+      if (chatMessage.isFriend) {
+        actions.append(globalChatAction("Invite to game", async () => {
+          try {
+            const timeControl = await openInviteTimePicker(chatMessage.username);
+            if (!timeControl) return;
+            await api("/api/invitations", {
+              method: "POST",
+              body: JSON.stringify({ friendId: chatMessage.userId, timeControl }),
+            });
+            globalChatStatus(`Game invitation sent to ${chatMessage.username}.`);
+          } catch (error) {
+            globalChatStatus(error.message);
+          }
+        }, false, true));
+      } else if (chatMessage.receivedRequestId) {
+        actions.append(globalChatAction("Accept request", async () => {
+          try {
+            await api(`/api/friends/requests/${chatMessage.receivedRequestId}`, {
+              method: "POST",
+              body: JSON.stringify({ accept: true }),
+            });
+            globalChatStatus(`You and ${chatMessage.username} are now friends.`);
+            await Promise.all([loadDashboard(), loadGlobalChat()]);
+          } catch (error) {
+            globalChatStatus(error.message);
+          }
+        }, false, true));
+      } else if (chatMessage.sentRequestId) {
+        actions.append(globalChatAction("Request sent", () => {}, true));
+      } else {
+        actions.append(globalChatAction("Add friend", async () => {
+          try {
+            const result = await api("/api/friends/requests", {
+              method: "POST",
+              body: JSON.stringify({ username: chatMessage.username }),
+            });
+            globalChatStatus(result.status === "friends"
+              ? `You and ${chatMessage.username} are now friends.`
+              : `Friend request sent to ${chatMessage.username}.`);
+            await Promise.all([loadDashboard(), loadGlobalChat()]);
+          } catch (error) {
+            globalChatStatus(error.message);
+          }
+        }));
+      }
+      entry.append(actions);
+    }
+    container.append(entry);
+  }
+  if (wasNearBottom) container.scrollTop = container.scrollHeight;
+}
+
+async function loadGlobalChat() {
+  try {
+    const { messages } = await api("/api/global-chat");
+    renderGlobalChat(messages);
+  } catch (error) {
+    const container = document.querySelector("#global-chat-messages");
+    globalChatKey = "";
+    container.replaceChildren();
+    const status = document.createElement("p");
+    status.className = "muted";
+    status.textContent = error.message;
+    container.append(status);
+  }
+}
+
 function setAccountView(user) {
   signedInUser = user;
   friendIds = new Set();
@@ -289,6 +404,9 @@ function setAccountView(user) {
   accountPanel.classList.toggle("hidden", signedIn);
   friendsPanel.classList.toggle("hidden", !signedIn);
   document.querySelector("#logout-button").classList.toggle("hidden", !signedIn);
+  document.querySelector("#global-chat-form").classList.toggle("hidden", !signedIn);
+  document.querySelector("#global-chat-login").classList.toggle("hidden", signedIn);
+  void loadGlobalChat();
   if (signedIn) {
     document.querySelector("#welcome-name").textContent = `Hello, ${user.username}`;
     loadDashboard();
@@ -581,6 +699,45 @@ document.querySelector("#close-invite-time").addEventListener("click", () => {
 });
 document.querySelector("#invite-time-modal").addEventListener("click", (event) => {
   if (event.target.id === "invite-time-modal") closeInviteTimePicker();
+});
+document.querySelector("#global-chat-toggle").addEventListener("click", (event) => {
+  const isOpening = document.querySelector("#global-chat-panel").classList.contains("hidden");
+  document.querySelector("#home-content").classList.toggle("hidden", isOpening);
+  document.querySelector("#global-chat-panel").classList.toggle("hidden", !isOpening);
+  event.currentTarget.setAttribute("aria-pressed", String(isOpening));
+  event.currentTarget.textContent = isOpening ? "Home" : "Global chat";
+  if (globalChatTimer) {
+    clearInterval(globalChatTimer);
+    globalChatTimer = null;
+  }
+  if (isOpening) {
+    void loadGlobalChat();
+    globalChatTimer = window.setInterval(loadGlobalChat, 3000);
+    document.querySelector("#global-chat-input").focus();
+  }
+});
+document.querySelector("#global-chat-sign-in").addEventListener("click", () => {
+  document.querySelector("#global-chat-toggle").click();
+  document.querySelector("#username-input").focus();
+});
+document.querySelector("#global-chat-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const sendButton = document.querySelector("#global-chat-send");
+  const input = document.querySelector("#global-chat-input");
+  sendButton.disabled = true;
+  try {
+    await api("/api/global-chat", {
+      method: "POST",
+      body: JSON.stringify({ message: input.value }),
+    });
+    input.value = "";
+    globalChatStatus("Message sent.");
+    await loadGlobalChat();
+  } catch (error) {
+    globalChatStatus(error.message);
+  } finally {
+    sendButton.disabled = false;
+  }
 });
 for (const [tabId, panelId, otherTabId, otherPanelId] of [
   ["leaderboard-tab", "leaderboard-panel", "live-matches-tab", "live-matches-panel"],

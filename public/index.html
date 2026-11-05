@@ -25,7 +25,10 @@
       <section class="board-column">
         <div id="spectator-banner" class="spectator-banner hidden">SPECTATING LIVE MATCH · VIEW ONLY</div>
         <div class="player-strip opponent-strip">
-          <div class="player-avatar avatar-dark">♚</div>
+          <div class="player-avatar-wrap">
+            <div class="player-avatar avatar-dark">♚</div>
+            <div id="black-chat-bubble" class="player-chat-bubble hidden" aria-live="polite"></div>
+          </div>
           <div class="player-meta"><strong id="black-name">BLACK</strong><small>PLAYER 2</small></div>
           <span class="rating-pill" id="black-rating">800 ELO</span>
           <span class="player-clock" id="black-clock">10:00</span>
@@ -37,7 +40,10 @@
           <div id="capture-effects" class="capture-effects" aria-hidden="true"></div>
         </div>
         <div class="player-strip current-strip">
-          <div class="player-avatar avatar-light">♔</div>
+          <div class="player-avatar-wrap">
+            <div class="player-avatar avatar-light">♔</div>
+            <div id="white-chat-bubble" class="player-chat-bubble hidden" aria-live="polite"></div>
+          </div>
           <div class="player-meta"><strong id="white-name">WHITE</strong><small>PLAYER 1</small></div>
           <span class="rating-pill" id="white-rating">800 ELO</span>
           <span class="player-clock" id="white-clock">10:00</span>
@@ -72,6 +78,29 @@
           <div id="move-list" class="move-list"><div class="empty-history"><p>No moves yet.</p></div></div>
         </section>
 
+        <section id="chat-panel" class="chat-panel panel">
+          <div class="section-heading chat-heading">
+            <div><span class="eyebrow">MESSAGES</span><h2>Game chat</h2></div>
+            <button id="close-quick-chat" class="quick-chat-close" type="button" aria-label="Close quick chat">×</button>
+          </div>
+          <div id="chat-messages" class="chat-messages" role="log"
+            aria-live="polite" aria-relevant="additions text">
+            <p class="empty-history">Say hello to your opponent.</p>
+          </div>
+          <div class="chat-quick-messages" aria-label="Quick messages">
+            <button class="quick-message-button" type="button" data-message="Good luck!">Good luck!</button>
+            <button class="quick-message-button" type="button" data-message="Nice move!">Nice move!</button>
+            <button class="quick-message-button" type="button" data-message="Well played!">Well played!</button>
+            <button class="quick-message-button" type="button" data-message="Rematch?">Rematch?</button>
+          </div>
+          <form id="chat-form" class="chat-form">
+            <label class="visually-hidden" for="chat-input">Write a message</label>
+            <input id="chat-input" maxlength="280" autocomplete="off"
+              placeholder="Message your opponent…" required>
+            <button id="chat-send" class="action-button primary" type="submit">SEND</button>
+          </form>
+        </section>
+
         <div class="action-row">
           <button class="action-button primary" id="new-game"><span>↻</span> NEW GAME</button>
           <button class="action-button forfeit-button" id="forfeit-game">FORFEIT</button>
@@ -82,6 +111,10 @@
         <footer>Move analysis powered by Stockfish 19 Lite.</footer>
       </aside>
     </section>
+    <button id="open-quick-chat" class="open-quick-chat hidden" type="button"
+      aria-controls="chat-panel" aria-expanded="false">
+      <span aria-hidden="true">▰</span> Chat
+    </button>
   </main>
 
   <div id="low-time-warning" class="low-time-warning hidden" aria-hidden="true">
