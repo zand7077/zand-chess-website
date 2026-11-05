@@ -482,11 +482,14 @@ function renderConstellations() {
         group.append(star);
       }
     }
-    for (let index = 0; index < 14; index += 1) {
+    const distantStarColors = ["#d7c8f1", "#b9dbe0", "#e7c2ce", "#c5d6b7", "#e9d8a8"];
+    for (let index = 0; index < 36; index += 1) {
       const star = document.createElementNS("http://www.w3.org/2000/svg", "circle");
       star.setAttribute("cx", (12 + random() * 776).toFixed(1));
-      star.setAttribute("cy", (24 + random() * 240).toFixed(1));
-      star.setAttribute("r", (0.6 + random() * 1.1).toFixed(1));
+      star.setAttribute("cy", (8 + random() * 284).toFixed(1));
+      star.setAttribute("r", (0.35 + random() * 0.45).toFixed(1));
+      star.setAttribute("fill", distantStarColors[Math.floor(random() * distantStarColors.length)]);
+      star.setAttribute("opacity", (0.2 + random() * 0.2).toFixed(2));
       star.setAttribute("class", "constellation-distant-star");
       group.append(star);
     }
