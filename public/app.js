@@ -404,7 +404,10 @@ function renderConstellations() {
     if (skin !== "nebula") continue;
     const random = seededRandom(`${gameKey}:${side}:constellation`);
     const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
-    group.setAttribute("transform", `translate(0 ${y})`);
+    group.setAttribute(
+      "transform",
+      `translate(0 ${y})${side === "black" ? " translate(0 400) scale(1 -1)" : ""}`,
+    );
     const patterns = [
       {
         points: [
@@ -438,22 +441,27 @@ function renderConstellations() {
         edges: [[0, 1], [1, 2], [2, 3], [3, 4], [5, 2], [2, 6]],
       },
     ];
-    const placements = [
-      { x: 24, y: 14, width: 145, height: 110 },
-      { x: 250, y: 28, width: 126, height: 93 },
-      { x: 482, y: 8, width: 145, height: 102 },
-      { x: 655, y: 159, width: 122, height: 96 },
-    ];
+    const rowTwoConstellationIndex = random() < 0.65
+      ? 1 + Math.floor(random() * (patterns.length - 1))
+      : -1;
     for (let index = 0; index < patterns.length; index += 1) {
       const pattern = patterns[index];
-      const placement = placements[index];
-      const centerX = placement.x + placement.width / 2;
-      const centerY = placement.y + placement.height / 2;
+      const centerX = Math.max(
+        76,
+        Math.min(724, 100 + index * 200 + (random() - 0.5) * 90),
+      );
+      const centerY = index === 0
+        ? 100 + (random() - 0.5) * 10
+        : index === rowTwoConstellationIndex
+          ? 210 + random() * 18
+          : 132 + random() * 22;
+      const width = 112 + random() * 32;
+      const height = 72 + random() * 14;
       const scale = 0.88 + random() * 0.2;
       const rotation = (random() - 0.5) * 20 * Math.PI / 180;
       const points = pattern.points.map(([x, pointY, magnitude]) => {
-        const offsetX = (x - 0.5) * placement.width * scale;
-        const offsetY = (pointY - 0.5) * placement.height * scale;
+        const offsetX = (x - 0.5) * width * scale;
+        const offsetY = (pointY - 0.5) * height * scale;
         return {
           x: centerX + offsetX * Math.cos(rotation) - offsetY * Math.sin(rotation),
           y: centerY + offsetX * Math.sin(rotation) + offsetY * Math.cos(rotation),
@@ -477,7 +485,7 @@ function renderConstellations() {
     for (let index = 0; index < 14; index += 1) {
       const star = document.createElementNS("http://www.w3.org/2000/svg", "circle");
       star.setAttribute("cx", (12 + random() * 776).toFixed(1));
-      star.setAttribute("cy", (8 + random() * 384).toFixed(1));
+      star.setAttribute("cy", (24 + random() * 240).toFixed(1));
       star.setAttribute("r", (0.6 + random() * 1.1).toFixed(1));
       star.setAttribute("class", "constellation-distant-star");
       group.append(star);
