@@ -315,6 +315,7 @@ def initialize_database(backend: str, config: dict[str, Any]) -> None:
                     invited_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
                     creator_side TEXT NOT NULL DEFAULT 'w',
                     bot_elo INTEGER,
+                    is_skin_preview INTEGER NOT NULL DEFAULT 0,
                     moves_json TEXT NOT NULL DEFAULT '[]',
                     grades_json TEXT NOT NULL DEFAULT '[]',
                     rating_changes_json TEXT,
@@ -389,6 +390,7 @@ def initialize_database(backend: str, config: dict[str, Any]) -> None:
             column_types = {
                 "creator_side": "TEXT NOT NULL DEFAULT 'w'",
                 "bot_elo": "INTEGER",
+                "is_skin_preview": "INTEGER NOT NULL DEFAULT 0",
                 "time_control": "TEXT NOT NULL DEFAULT 'rapid_10_0'",
                 "white_time_ms": "INTEGER NOT NULL DEFAULT 600000",
                 "black_time_ms": "INTEGER NOT NULL DEFAULT 600000",
@@ -491,6 +493,7 @@ def initialize_database(backend: str, config: dict[str, Any]) -> None:
                 invited_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
                 creator_side VARCHAR(1) NOT NULL DEFAULT 'w',
                 bot_elo INTEGER,
+                is_skin_preview INTEGER NOT NULL DEFAULT 0,
                 moves_json TEXT NOT NULL DEFAULT '[]',
                 grades_json TEXT NOT NULL DEFAULT '[]',
                 rating_changes_json TEXT,
@@ -557,6 +560,7 @@ def initialize_database(backend: str, config: dict[str, Any]) -> None:
             "ALTER TABLE games ADD COLUMN IF NOT EXISTS rating_changes_json TEXT",
             "ALTER TABLE games ADD COLUMN IF NOT EXISTS creator_side VARCHAR(1) NOT NULL DEFAULT 'w'",
             "ALTER TABLE games ADD COLUMN IF NOT EXISTS bot_elo INTEGER",
+            "ALTER TABLE games ADD COLUMN IF NOT EXISTS is_skin_preview INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE games ADD COLUMN IF NOT EXISTS white_last_seen_at BIGINT",
             "ALTER TABLE games ADD COLUMN IF NOT EXISTS black_last_seen_at BIGINT",
             "ALTER TABLE games ADD COLUMN IF NOT EXISTS rematch_requested_by VARCHAR(1)",
@@ -643,6 +647,7 @@ def initialize_database(backend: str, config: dict[str, Any]) -> None:
             invited_user_id BIGINT,
             creator_side VARCHAR(1) NOT NULL DEFAULT 'w',
             bot_elo INTEGER,
+            is_skin_preview INTEGER NOT NULL DEFAULT 0,
             moves_json TEXT NOT NULL,
             grades_json TEXT NOT NULL,
             rating_changes_json TEXT,
@@ -749,6 +754,7 @@ def initialize_database(backend: str, config: dict[str, Any]) -> None:
         column_types = {
             "creator_side": "VARCHAR(1) NOT NULL DEFAULT 'w'",
             "bot_elo": "INTEGER",
+            "is_skin_preview": "INTEGER NOT NULL DEFAULT 0",
             "time_control": "VARCHAR(24) NOT NULL DEFAULT 'rapid_10_0'",
             "white_time_ms": "BIGINT NOT NULL DEFAULT 600000",
             "black_time_ms": "BIGINT NOT NULL DEFAULT 600000",
@@ -1082,7 +1088,7 @@ def live_matches():
         FROM games g
         LEFT JOIN users white ON white.id = g.white_user_id
         LEFT JOIN users black ON black.id = g.black_user_id
-        WHERE g.status = 'active'
+        WHERE g.status = 'active' AND g.is_skin_preview = 0
         ORDER BY g.created_at DESC
         LIMIT 50
         """
@@ -1199,7 +1205,7 @@ def user_profile(user_id: int):
         FROM games
         WHERE ((white_user_id = ? AND status = 'completed')
             OR (black_user_id = ? AND status = 'completed'))
-            AND result IS NOT NULL
+            AND result IS NOT NULL AND is_skin_preview = 0
         """,
         (user_id, user_id, user_id, user_id),
     ).fetchone()
@@ -1215,6 +1221,7 @@ def user_profile(user_id: int):
         LEFT JOIN users black ON black.id = g.black_user_id
         WHERE (g.white_user_id = ? OR g.black_user_id = ?)
             AND g.status = 'completed' AND g.result IS NOT NULL
+            AND g.is_skin_preview = 0
         ORDER BY g.created_at DESC, g.id DESC
         LIMIT 10
         """,
@@ -1367,6 +1374,7 @@ def dashboard():
         LEFT JOIN users white ON white.id = g.white_user_id
         LEFT JOIN users black ON black.id = g.black_user_id
         WHERE g.invited_user_id = ? AND g.status = 'waiting'
+            AND g.is_skin_preview = 0
         ORDER BY g.created_at DESC
         """,
         (user["id"],),
@@ -1380,7 +1388,8 @@ def dashboard():
         FROM games g
         LEFT JOIN users white ON white.id = g.white_user_id
         LEFT JOIN users black ON black.id = g.black_user_id
-        WHERE (g.white_user_id = ? OR g.black_user_id = ?) AND g.status != 'completed'
+        WHERE (g.white_user_id = ? OR g.black_user_id = ?)
+            AND g.status != 'completed' AND g.is_skin_preview = 0
         ORDER BY g.created_at DESC
         """,
         (user["id"], user["id"]),
@@ -1557,9 +1566,13 @@ def create_bot_game():
     if selected_time_control is None:
         return error("Choose a supported time control.")
     time_control, settings = selected_time_control
-    bot_elo = json_body().get("botElo")
+    body = json_body()
+    bot_elo = body.get("botElo")
+    skin_preview = body.get("skinPreview", False)
     if not isinstance(bot_elo, int) or isinstance(bot_elo, bool) or bot_elo not in BOT_ELOS:
         return error("Choose a supported Stockfish opponent.")
+    if not isinstance(skin_preview, bool):
+        return error("Choose whether this is a skin preview.")
     user = current_user()
     visitor_id = guest_id() if user is None else None
     code = new_room_code()
@@ -1567,13 +1580,13 @@ def create_bot_game():
         """
         INSERT INTO games(
             room_code, white_user_id, white_guest_id, creator_side, bot_elo,
-            moves_json, grades_json, status, time_control,
+            is_skin_preview, moves_json, grades_json, status, time_control,
             white_time_ms, black_time_ms, increment_seconds
         )
-        VALUES (?, ?, ?, 'w', ?, '[]', '[]', 'active', ?, ?, ?, ?)
+        VALUES (?, ?, ?, 'w', ?, ?, '[]', '[]', 'active', ?, ?, ?, ?)
         """,
         (
-            code, user["id"] if user else None, visitor_id, bot_elo,
+            code, user["id"] if user else None, visitor_id, bot_elo, int(skin_preview),
             time_control, int(settings["seconds"]) * 1000,
             int(settings["seconds"]) * 1000, int(settings["increment"]),
         ),
@@ -1868,7 +1881,7 @@ def elo_changes(
 def rate_completed_game(
     connection: sqlite3.Connection, room: sqlite3.Row, result: str
 ) -> None:
-    if room["rating_changes_json"] is not None:
+    if room["is_skin_preview"] or room["rating_changes_json"] is not None:
         return
     changes: dict[str, dict[str, int]] = {}
     if room["white_user_id"] is not None and room["black_user_id"] is not None:
@@ -2063,8 +2076,10 @@ def room_snapshot(
         "blackTimeMs": black_time_ms,
         "clockStartedAt": room["clock_started_at"],
         "rematchRequestedBy": room["rematch_requested_by"],
+        "gameRound": room["game_round"],
         "roomCode": room["room_code"],
         "botElo": room["bot_elo"],
+        "isSkinPreview": bool(room["is_skin_preview"]),
         "playerSide": side,
         "canCloseWaitingRoom": side == room["creator_side"],
         "opponentPresent": opponent_present,
@@ -2317,7 +2332,7 @@ def get_room_state(code: str):
 @bp.get("/api/rooms/<code>/spectate")
 def spectate_room(code: str):
     room = load_room(code.upper())
-    if room is None:
+    if room is None or room["is_skin_preview"]:
         return error("That room could not be found.", 404)
     if room["status"] not in ("active", "completed"):
         return error("That match is not live.", 409)
@@ -2347,6 +2362,17 @@ def close_room(code: str):
     if room is None or side is None:
         connection.rollback()
         return error("You are not a player in this room.", 403)
+    if room["is_skin_preview"]:
+        connection.execute(
+            """
+            UPDATE games SET status = 'completed', result = 'Preview closed',
+                clock_started_at = NULL, rematch_requested_by = NULL
+            WHERE id = ? AND status = 'active'
+            """,
+            (room["id"],),
+        )
+        connection.commit()
+        return jsonify(ok=True, status="completed")
     if room["status"] == "waiting":
         user = current_user()
         if side != room["creator_side"]:

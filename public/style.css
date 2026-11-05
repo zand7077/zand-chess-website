@@ -73,6 +73,8 @@ button { color: inherit; }
 .drag-piece.black { color: #27292e; }
 .piece.white { color: #fffdfa; -webkit-text-stroke: .65px #5e5a55; text-shadow: 0 1px 1px #3d3a3740; }
 .piece.black { color: #27292e; }
+.piece.contrast-outline { -webkit-text-stroke: 1px #e8dfcc; filter: drop-shadow(0 0 1px #f2e7d4) drop-shadow(0 0 1px #f2e7d4); }
+.square:hover .piece.contrast-outline,.square.piece-pressed .piece.contrast-outline { filter: drop-shadow(0 0 1px #f2e7d4) drop-shadow(0 0 1px #f2e7d4) drop-shadow(0 4px 3px #25272a55); }
 .legal-dot { position: absolute; z-index: 1; width: 25%; aspect-ratio: 1; border-radius: 50%; background: rgba(15,25,34,.28); box-shadow: 0 0 0 1px rgba(255,255,255,.13); }
 .square.has-legal-move::after { content: ""; position: absolute; z-index: 1; width: 24%; aspect-ratio: 1; border-radius: 50%; background: rgba(15,25,34,.28); }
 .square.capture-target::before { content: ""; position: absolute; z-index: 3; inset: 4%; border: 3px solid rgba(42,39,36,.42); border-radius: 50%; pointer-events: none; }
@@ -164,6 +166,10 @@ h1,h2,p { margin: 0; }
 .review-mode #game-review-panel { max-height: 82vh; overflow: auto; padding: 16px; }
 .square.review-played-square::after { position: absolute; z-index: 1; inset: 0; border: 2px solid #bd985c; background: #d7b76b33; content: ""; pointer-events: none; }
 .board #review-arrow-overlay { position: absolute; z-index: 5; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.board .constellation-overlay { position: absolute; z-index: 1; inset: 0; width: 100%; height: 100%; overflow: hidden; pointer-events: none; }
+.constellation-line { fill: none; stroke: #c6a665; stroke-width: 1.05; stroke-linecap: round; stroke-linejoin: round; opacity: .34; }
+.constellation-star { fill: #f1d997; opacity: .78; }
+.constellation-distant-star { fill: #d7c8f1; opacity: .55; }
 .review-move-arrow-halo { fill: none; stroke: #f6f1e4; stroke-width: 16; stroke-linecap: round; stroke-linejoin: round; opacity: .9; }
 .review-move-arrow { fill: none; stroke: #398451; stroke-width: 8; stroke-linecap: round; stroke-linejoin: round; filter: drop-shadow(0 1px 2px #203c2e88); }
 .review-arrow-head { fill: #398451; stroke: #f6f1e4; stroke-width: 1.1; stroke-linejoin: round; }
@@ -185,17 +191,21 @@ h1,h2,p { margin: 0; }
 .square.light.board-skin-white-rosewood,.square.light.board-skin-black-rosewood { --board-light: #f1ddd5; }
 .square.dark.board-skin-white-rosewood,.square.dark.board-skin-black-rosewood { --board-dark: #9a5c55; }
 .square.light.board-skin-white-monochrome,.square.light.board-skin-black-monochrome { --board-light: #f2f2f0; }
-.square.dark.board-skin-white-monochrome,.square.dark.board-skin-black-monochrome { --board-dark: #474a51; }
+.square.dark.board-skin-white-monochrome,.square.dark.board-skin-black-monochrome { --board-dark: #282a30; }
 .square.light.board-skin-white-nebula,.square.light.board-skin-black-nebula { --board-light: #e5ddef; }
-.square.dark.board-skin-white-nebula,.square.dark.board-skin-black-nebula { --board-dark: #493b61; }
-.square.nebula-detail.light.board-skin-white-nebula,.square.nebula-detail.light.board-skin-black-nebula { background-image: radial-gradient(circle at 15% 19%,#9a793d 0 1px,transparent 1.8px),radial-gradient(circle at 79% 26%,#75648f 0 1px,transparent 1.8px),radial-gradient(circle at 72% 82%,#9a793d 0 1px,transparent 1.8px),radial-gradient(circle at 24% 72%,#75648f 0 1px,transparent 1.8px),radial-gradient(ellipse at center,transparent 39%,#ac8f5e42 45%,transparent 49%); }
-.square.nebula-detail.dark.board-skin-white-nebula,.square.nebula-detail.dark.board-skin-black-nebula { background-image: radial-gradient(circle at 15% 19%,#f3d996 0 1px,transparent 1.8px),radial-gradient(circle at 79% 26%,#ded2ff 0 1px,transparent 1.8px),radial-gradient(circle at 72% 82%,#f3d996 0 1px,transparent 1.8px),radial-gradient(circle at 24% 72%,#ded2ff 0 1px,transparent 1.8px),radial-gradient(ellipse at center,transparent 39%,#d4b76850 45%,transparent 49%); }
-.square.dark.board-skin-white-monochrome .piece.black,
-.square.dark.board-skin-black-monochrome .piece.black,
-.square.dark.board-skin-white-nebula .piece.black,
-.square.dark.board-skin-black-nebula .piece.black {
-  -webkit-text-stroke: 1px #e8dfcc;
-  filter: drop-shadow(0 0 1px #f2e7d4) drop-shadow(0 0 1px #f2e7d4);
+.square.dark.board-skin-white-nebula,.square.dark.board-skin-black-nebula { --board-dark: #34284d; }
+.square .nebula-square-detail { position: absolute; z-index: 1; inset: 0; opacity: 0; pointer-events: none; }
+.square.nebula-detail.light.board-skin-white-nebula .nebula-square-detail,
+.square.nebula-detail.light.board-skin-black-nebula .nebula-square-detail {
+  background-image: radial-gradient(circle at var(--atlas-star-a-x) var(--atlas-star-a-y),#9a793d 0 1px,transparent 1.8px),radial-gradient(circle at var(--atlas-star-b-x) var(--atlas-star-b-y),#75648f 0 1px,transparent 1.8px),radial-gradient(circle at var(--atlas-star-c-x) var(--atlas-star-c-y),#9a793d 0 1px,transparent 1.8px),radial-gradient(ellipse var(--atlas-orbit-size) 28% at 50% 50%,transparent 42%,#ac8f5e42 47%,transparent 53%);
+  opacity: .78;
+  transform: rotate(var(--atlas-orbit-rotation));
+}
+.square.nebula-detail.dark.board-skin-white-nebula .nebula-square-detail,
+.square.nebula-detail.dark.board-skin-black-nebula .nebula-square-detail {
+  background-image: radial-gradient(circle at var(--atlas-star-a-x) var(--atlas-star-a-y),#f3d996 0 1px,transparent 1.8px),radial-gradient(circle at var(--atlas-star-b-x) var(--atlas-star-b-y),#ded2ff 0 1px,transparent 1.8px),radial-gradient(circle at var(--atlas-star-c-x) var(--atlas-star-c-y),#f3d996 0 1px,transparent 1.8px),radial-gradient(ellipse var(--atlas-orbit-size) 28% at 50% 50%,transparent 42%,#d4b76850 47%,transparent 53%);
+  opacity: .82;
+  transform: rotate(var(--atlas-orbit-rotation));
 }
 .piece.skin-white-ivory,.drag-piece.skin-white-ivory { color: #fff2c6; -webkit-text-stroke: .65px #806438; }
 .piece.skin-black-ivory,.drag-piece.skin-black-ivory { color: #755125; }

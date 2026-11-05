@@ -19,6 +19,7 @@ const boardElement = document.querySelector("#board");
 const toastElement = document.querySelector("#toast");
 const trySkinMatch = new URLSearchParams(window.location.search)
   .get("try")?.match(/^(board|piece):([a-z0-9-]+)$/);
+const isSpectatorPage = new URLSearchParams(window.location.search).get("spectate") === "1";
 if (trySkinMatch) {
   const cleanUrl = new URL(window.location.href);
   cleanUrl.searchParams.delete("try");
@@ -26,10 +27,14 @@ if (trySkinMatch) {
 }
 const state = {
   game: null,
-  trySkin: trySkinMatch ? { type: trySkinMatch[1], id: trySkinMatch[2] } : null,
-  nebulaDetailSquares: null,
+  trySkin: trySkinMatch && !isSpectatorPage
+    ? { type: trySkinMatch[1], id: trySkinMatch[2] }
+    : null,
+  isSkinPreview: false,
+  constellationKey: null,
+  atlasSquareDetails: {},
   roomCode: new URLSearchParams(window.location.search).get("room")?.toUpperCase() || "",
-  isSpectator: new URLSearchParams(window.location.search).get("spectate") === "1",
+  isSpectator: isSpectatorPage,
   selected: null,
   premoves: [],
   drag: null,
@@ -307,32 +312,132 @@ function pieceSkinClass(color) {
   return skin === "classic" ? "" : `skin-${side}-${skin}`;
 }
 
-function nebulaDetailSquares() {
-  if (state.nebulaDetailSquares) return state.nebulaDetailSquares;
-  const seed = state.roomCode;
-  const rankedBySide = [[], []];
-  for (let row = 0; row < 8; row += 1) {
-    for (let col = 0; col < 8; col += 1) {
-      const name = squareName(row, col);
-      let hash = 2166136261;
-      for (const character of `${seed}:${name}`) {
-        hash = Math.imul(hash ^ character.charCodeAt(0), 16777619) >>> 0;
-      }
-      rankedBySide[row >= 4 ? 1 : 0].push({ name, hash });
-    }
-  }
-  state.nebulaDetailSquares = new Set();
-  for (const rankedSquares of rankedBySide) {
-    rankedSquares.sort((a, b) => a.hash - b.hash || a.name.localeCompare(b.name));
-    for (const { name } of rankedSquares.slice(0, 16)) {
-      state.nebulaDetailSquares.add(name);
-    }
-  }
-  return state.nebulaDetailSquares;
-}
-
 function squareCoords(name) {
   return { row: 8 - Number(name[1]), col: name.charCodeAt(0) - 97 };
+}
+
+function hasDarkSurface(square) {
+  const color = window.getComputedStyle(square).backgroundColor.match(
+    /rgba?\((\d+),\s*(\d+),\s*(\d+)/,
+  );
+  if (!color) return false;
+  const channels = color.slice(1).map((value) => {
+    const channel = Number(value) / 255;
+    return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+  });
+  const luminance = 0.2126 * channels[0] +
+    0.7152 * channels[1] + 0.0722 * channels[2];
+  return luminance < 0.14;
+}
+
+function seededRandom(seedText) {
+  let seed = 2166136261;
+  for (const character of seedText) {
+    seed = Math.imul(seed ^ character.charCodeAt(0), 16777619) >>> 0;
+  }
+  return () => {
+    seed += 0x6D2B79F5;
+    let value = seed;
+    value = Math.imul(value ^ (value >>> 15), value | 1);
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function atlasSquareDetails(side) {
+  const gameKey = `${state.roomCode}:${state.game.gameRound || 1}`;
+  const key = `${gameKey}:${side}`;
+  if (state.atlasSquareDetails[key]) return state.atlasSquareDetails[key];
+
+  const startingRows = side === "white" ? [6, 7] : [0, 1];
+  const middleRows = side === "white" ? [4, 5] : [2, 3];
+  const startingSquares = startingRows.flatMap((row) =>
+    Array.from({ length: 8 }, (_, col) => squareName(row, col)));
+  const middleSquares = middleRows.flatMap((row) =>
+    Array.from({ length: 8 }, (_, col) => squareName(row, col)));
+  const random = seededRandom(`${key}:square-details`);
+  const choose = (squares, count) => {
+    const shuffled = [...squares];
+    for (let index = shuffled.length - 1; index > 0; index -= 1) {
+      const swap = Math.floor(random() * (index + 1));
+      [shuffled[index], shuffled[swap]] = [shuffled[swap], shuffled[index]];
+    }
+    return shuffled.slice(0, count);
+  };
+  const details = new Map();
+  for (const name of [
+    ...choose(startingSquares, 8),
+    ...choose(middleSquares, 2),
+  ]) {
+    details.set(name, {
+      "--atlas-star-a-x": `${(12 + random() * 76).toFixed(1)}%`,
+      "--atlas-star-a-y": `${(12 + random() * 76).toFixed(1)}%`,
+      "--atlas-star-b-x": `${(12 + random() * 76).toFixed(1)}%`,
+      "--atlas-star-b-y": `${(12 + random() * 76).toFixed(1)}%`,
+      "--atlas-star-c-x": `${(12 + random() * 76).toFixed(1)}%`,
+      "--atlas-star-c-y": `${(12 + random() * 76).toFixed(1)}%`,
+      "--atlas-orbit-size": `${34 + random() * 28}%`,
+      "--atlas-orbit-rotation": `${Math.floor(random() * 180)}deg`,
+    });
+  }
+  state.atlasSquareDetails[key] = details;
+  return details;
+}
+
+function renderConstellations() {
+  const overlay = document.querySelector("#constellation-overlay");
+  if (!overlay || !state.game) return;
+  const whiteSkin = state.isSkinPreview && state.trySkin?.type === "board"
+    ? state.trySkin.id
+    : state.game.whiteBoardSkin;
+  const halves = [
+    { side: "white", skin: whiteSkin, y: state.flipped ? 0 : 400 },
+    { side: "black", skin: state.game.blackBoardSkin, y: state.flipped ? 400 : 0 },
+  ];
+  const gameKey = `${state.roomCode}:${state.game.gameRound || 1}`;
+  const key = `${gameKey}:${halves.map(({ side, skin, y }) =>
+    `${side}:${skin}:${y}`).join("|")}`;
+  if (key === state.constellationKey) return;
+  state.constellationKey = key;
+  overlay.replaceChildren();
+  for (const { side, skin, y } of halves) {
+    if (skin !== "nebula") continue;
+    const random = seededRandom(`${gameKey}:${side}:constellation`);
+    const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    group.setAttribute("transform", `translate(0 ${y})`);
+    const anchors = [
+      { x: 95, y: 72 }, { x: 280, y: 120 }, { x: 495, y: 64 },
+      { x: 690, y: 150 }, { x: 430, y: 310 },
+    ];
+    for (const anchor of anchors) {
+      const points = Array.from({ length: 4 + Math.floor(random() * 3) }, () => ({
+        x: anchor.x + (random() - 0.5) * 112,
+        y: anchor.y + (random() - 0.5) * 76,
+      }));
+      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      path.setAttribute("d", points.map(({ x, y: pointY }, index) =>
+        `${index ? "L" : "M"}${x.toFixed(1)} ${pointY.toFixed(1)}`).join(" "));
+      path.setAttribute("class", "constellation-line");
+      group.append(path);
+      for (const point of points) {
+        const star = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+        star.setAttribute("cx", point.x.toFixed(1));
+        star.setAttribute("cy", point.y.toFixed(1));
+        star.setAttribute("r", (1.3 + random() * 1.8).toFixed(1));
+        star.setAttribute("class", "constellation-star");
+        group.append(star);
+      }
+    }
+    for (let index = 0; index < 14; index += 1) {
+      const star = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      star.setAttribute("cx", (12 + random() * 776).toFixed(1));
+      star.setAttribute("cy", (8 + random() * 384).toFixed(1));
+      star.setAttribute("r", (0.6 + random() * 1.1).toFixed(1));
+      star.setAttribute("class", "constellation-distant-star");
+      group.append(star);
+    }
+    overlay.append(group);
+  }
 }
 
 function showToast(message) {
@@ -502,16 +607,28 @@ function makeBoard() {
       file.className = "coordinate file";
       const dot = document.createElement("span");
       dot.className = "legal-dot";
+      const detail = document.createElement("span");
+      detail.className = "nebula-square-detail";
+      detail.setAttribute("aria-hidden", "true");
       const piece = document.createElement("span");
       piece.className = "piece";
       const premoveNumber = document.createElement("span");
       premoveNumber.className = "premove-number hidden";
-      button.append(rank, file, dot, piece, premoveNumber);
+      button.append(rank, file, dot, detail, piece, premoveNumber);
       gridSquares.set(`${displayRow},${displayCol}`, button);
-      squareParts.set(button, { rank, file, dot, piece, premoveNumber });
+      squareParts.set(button, { rank, file, dot, detail, piece, premoveNumber });
       boardElement.append(button);
     }
   }
+  const constellationOverlay = document.createElementNS(
+    "http://www.w3.org/2000/svg",
+    "svg",
+  );
+  constellationOverlay.id = "constellation-overlay";
+  constellationOverlay.setAttribute("viewBox", "0 0 800 800");
+  constellationOverlay.setAttribute("aria-hidden", "true");
+  constellationOverlay.classList.add("constellation-overlay");
+  boardElement.append(constellationOverlay);
   const overlay = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   overlay.id = "review-arrow-overlay";
   overlay.setAttribute("viewBox", "0 0 1000 1000");
@@ -587,14 +704,21 @@ function setBoardOrientation() {
       square.style.gridColumn = String(displayCol + 1);
       square.className = `square ${(row + col) % 2 === 0 ? "light" : "dark"}`;
       const boardSide = row >= 4 ? "white" : "black";
-      const boardSkin = boardSide === "white" && state.trySkin?.type === "board"
+      const boardSkin = boardSide === "white" &&
+        state.isSkinPreview && state.trySkin?.type === "board"
         ? state.trySkin.id
         : state.game[`${boardSide}BoardSkin`] || "classic";
       if (boardSkin !== "classic") {
         square.classList.add(`board-skin-${boardSide}-${boardSkin}`);
       }
-      if (boardSkin === "nebula" && nebulaDetailSquares().has(name)) {
-        square.classList.add("nebula-detail");
+      if (boardSkin === "nebula") {
+        const detail = atlasSquareDetails(boardSide).get(name);
+        if (detail) {
+          square.classList.add("nebula-detail");
+          for (const [property, value] of Object.entries(detail)) {
+            square.style.setProperty(property, value);
+          }
+        }
       }
       square.dataset.square = name;
       squares.set(name, square);
@@ -656,12 +780,16 @@ function setBoardOrientation() {
       parts.piece.className = pieceCode
         ? `piece ${pieceCode[0] === "w" ? "white" : "black"} ${pieceSkinClass(pieceCode[0])}`
         : "piece";
+      if (pieceCode?.[0] === "b" && hasDarkSurface(square)) {
+        parts.piece.classList.add("contrast-outline");
+      }
       if (isReviewing && selectedCandidate?.from === name) {
         parts.piece.classList.add("review-candidate-piece");
       }
       parts.piece.draggable = false;
     }
   }
+  renderConstellations();
   renderReviewArrow(selectedCandidate);
 }
 
@@ -861,6 +989,7 @@ function reviewExplanation(ply) {
 
 function renderGameReview() {
   const available = state.game.over && !state.isSpectator &&
+    !state.isSkinPreview &&
     state.game.history.length > 0;
   const panel = document.querySelector("#game-review-panel");
   panel.classList.toggle("hidden", !available);
@@ -1089,7 +1218,9 @@ function renderTurn() {
   document.querySelector("#white-rating").textContent = `${state.game.whiteRating} ELO`;
   document.querySelector("#black-rating").textContent = `${state.game.blackRating} ELO`;
   document.querySelector("#room-label").textContent =
-    `${state.isSpectator ? "SPECTATING" : "ROOM"} ${state.game.roomCode}`;
+    state.isSkinPreview
+      ? "SKIN TRYOUT"
+      : `${state.isSpectator ? "SPECTATING" : "ROOM"} ${state.game.roomCode}`;
   document.querySelector("#time-control-label").textContent = state.game.timeControl;
   renderClocks();
   document.querySelector("#turn-name").textContent =
@@ -1212,6 +1343,12 @@ async function setRoomTyping(isTyping) {
 
 function render() {
   if (!state.game) return;
+  const isSkinPreview = state.isSkinPreview && !state.isSpectator;
+  document.title = isSkinPreview ? "Skin tryout | Chess" : "Chess";
+  document.querySelector(".app-shell").classList.toggle(
+    "skin-preview-mode",
+    isSkinPreview,
+  );
   document.querySelector(".app-shell").classList.toggle(
     "review-mode",
     state.reviewPly !== null && state.game.over && !state.isSpectator,
@@ -1226,6 +1363,12 @@ function render() {
     quickChatButton.innerHTML = '<span aria-hidden="true">▰</span> Chat';
   }
   document.querySelector(".action-row").classList.toggle("hidden", state.isSpectator);
+  for (const selector of [
+    "#new-game", "#forfeit-game", "#share-room", "#close-room",
+  ]) {
+    document.querySelector(selector).classList.toggle("hidden", isSkinPreview);
+  }
+  document.querySelector("#exit-tryout").classList.toggle("hidden", !isSkinPreview);
   renderBoard();
   renderTurn();
   renderChatBubbles();
@@ -1278,7 +1421,8 @@ function render() {
   document.querySelector("#accept-rematch").classList.toggle("hidden", isRematchRequester);
   document.querySelector("#decline-rematch").textContent =
     isRematchRequester ? "Cancel request" : "Decline";
-  if (!state.isSpectator && state.game.over && !state.modalShown) {
+  if (!state.isSpectator && !state.isSkinPreview &&
+      state.game.over && !state.modalShown) {
     state.modalShown = true;
     openEloModal(state.game.result);
   }
@@ -1325,6 +1469,8 @@ async function updateGame(next, animate = false) {
   const highlightedGrade = state.game
     ? newlyHighlightedGrade(previousHistory, next.history)
     : null;
+  state.isSkinPreview = Boolean(next.isSkinPreview) && !state.isSpectator;
+  if (!state.isSkinPreview) state.trySkin = null;
   state.game = next;
   state.requiresAcceptance = Boolean(next.requiresAcceptance);
   state.clockSyncAt = Date.now();
@@ -1568,6 +1714,23 @@ async function closeRoom() {
   }
 }
 
+async function exitSkinPreview() {
+  if (!state.isSkinPreview || state.isSpectator || state.busy) return;
+  state.busy = true;
+  const exitButton = document.querySelector("#exit-tryout");
+  exitButton.disabled = true;
+  try {
+    if (!state.game.over && state.game.status === "active") {
+      await api(roomApiPath("/close"), { method: "POST", body: "{}" });
+    }
+    window.location.replace("/?view=shop");
+  } catch (error) {
+    showToast(error.message);
+    state.busy = false;
+    exitButton.disabled = false;
+  }
+}
+
 function updateClock() {
   renderClocks();
 }
@@ -1654,6 +1817,7 @@ document.querySelector("#decline-rematch").addEventListener("click", () => {
 });
 document.querySelector("#forfeit-game").addEventListener("click", forfeitGame);
 document.querySelector("#close-room").addEventListener("click", closeRoom);
+document.querySelector("#exit-tryout").addEventListener("click", exitSkinPreview);
 document.querySelector("#room-notice-action").addEventListener("click", async () => {
   const action = document.querySelector("#room-notice-action");
   if (!state.game) return;
@@ -1772,7 +1936,10 @@ for (const quickMessage of document.querySelectorAll(".quick-message-button")) {
 window.addEventListener("pagehide", () => {
   if (state.isSpectator || !state.roomCode || !state.game || state.game.status === "completed") return;
   const body = new Blob(["{}"], { type: "application/json" });
-  navigator.sendBeacon(roomApiPath("/leave"), body);
+  navigator.sendBeacon(
+    roomApiPath(state.isSkinPreview ? "/close" : "/leave"),
+    body,
+  );
 });
 makeBoard();
 if (!state.roomCode) {

@@ -492,7 +492,7 @@ function renderSkinCards(type, container, skins = shopState.skins[type]) {
       const note = document.createElement("span");
       note.className = "skin-card-note";
       note.setAttribute("role", "note");
-      note.textContent = "Star-map details are randomized on half the squares each game.";
+      note.textContent = "A unique constellation is drawn across your half each game.";
       copy.append(note);
     }
     const locked = Boolean(skin.ownerOnly && !skin.owned);
@@ -530,7 +530,7 @@ function renderSkinCards(type, container, skins = shopState.skins[type]) {
         try {
           const game = await api("/api/bot-games", {
             method: "POST",
-            body: JSON.stringify({ botElo: 200 }),
+            body: JSON.stringify({ botElo: 200, skinPreview: true }),
           });
           window.location.href = `${game.url}&try=${encodeURIComponent(`${type}:${skin.id}`)}`;
         } catch (error) {
@@ -874,6 +874,9 @@ document.querySelector("#global-chat-toggle").addEventListener("click", () => {
 document.querySelector("#shop-toggle").addEventListener("click", () => {
   setLobbyView(activeView === "shop" ? "home" : "shop");
 });
+if (new URLSearchParams(window.location.search).get("view") === "shop") {
+  setLobbyView("shop");
+}
 document.querySelector("#shop-sign-in").addEventListener("click", () => {
   setLobbyView("home");
   document.querySelector("#username-input").focus();
