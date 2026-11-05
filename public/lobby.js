@@ -488,6 +488,13 @@ function renderSkinCards(type, container, skins = shopState.skins[type]) {
       : skin.price ? `${skin.price} coins` : "Included";
     price.hidden = Boolean(skin.ownerOnly && !skin.owned);
     copy.append(name, price);
+    if (type === "board" && skin.id === "nebula") {
+      const note = document.createElement("span");
+      note.className = "skin-card-note";
+      note.setAttribute("role", "note");
+      note.textContent = "Star-map details are randomized on half the squares each game.";
+      copy.append(note);
+    }
     const locked = Boolean(skin.ownerOnly && !skin.owned);
     const actionLabel = skin.equipped
       ? "Equipped"

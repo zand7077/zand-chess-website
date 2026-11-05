@@ -27,6 +27,7 @@ if (trySkinMatch) {
 const state = {
   game: null,
   trySkin: trySkinMatch ? { type: trySkinMatch[1], id: trySkinMatch[2] } : null,
+  nebulaDetailSquares: null,
   roomCode: new URLSearchParams(window.location.search).get("room")?.toUpperCase() || "",
   isSpectator: new URLSearchParams(window.location.search).get("spectate") === "1",
   selected: null,
@@ -306,6 +307,30 @@ function pieceSkinClass(color) {
   return skin === "classic" ? "" : `skin-${side}-${skin}`;
 }
 
+function nebulaDetailSquares() {
+  if (state.nebulaDetailSquares) return state.nebulaDetailSquares;
+  const seed = state.roomCode;
+  const rankedBySide = [[], []];
+  for (let row = 0; row < 8; row += 1) {
+    for (let col = 0; col < 8; col += 1) {
+      const name = squareName(row, col);
+      let hash = 2166136261;
+      for (const character of `${seed}:${name}`) {
+        hash = Math.imul(hash ^ character.charCodeAt(0), 16777619) >>> 0;
+      }
+      rankedBySide[row >= 4 ? 1 : 0].push({ name, hash });
+    }
+  }
+  state.nebulaDetailSquares = new Set();
+  for (const rankedSquares of rankedBySide) {
+    rankedSquares.sort((a, b) => a.hash - b.hash || a.name.localeCompare(b.name));
+    for (const { name } of rankedSquares.slice(0, 16)) {
+      state.nebulaDetailSquares.add(name);
+    }
+  }
+  return state.nebulaDetailSquares;
+}
+
 function squareCoords(name) {
   return { row: 8 - Number(name[1]), col: name.charCodeAt(0) - 97 };
 }
@@ -567,6 +592,9 @@ function setBoardOrientation() {
         : state.game[`${boardSide}BoardSkin`] || "classic";
       if (boardSkin !== "classic") {
         square.classList.add(`board-skin-${boardSide}-${boardSkin}`);
+      }
+      if (boardSkin === "nebula" && nebulaDetailSquares().has(name)) {
+        square.classList.add("nebula-detail");
       }
       square.dataset.square = name;
       squares.set(name, square);
