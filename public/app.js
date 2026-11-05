@@ -405,25 +405,71 @@ function renderConstellations() {
     const random = seededRandom(`${gameKey}:${side}:constellation`);
     const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
     group.setAttribute("transform", `translate(0 ${y})`);
-    const anchors = [
-      { x: 95, y: 72 }, { x: 280, y: 120 }, { x: 495, y: 64 },
-      { x: 690, y: 150 }, { x: 430, y: 310 },
+    const patterns = [
+      {
+        points: [
+          [0.12, 0.08, 1.7], [0.79, 0.12, 1.9], [0.22, 0.42, 1.4],
+          [0.46, 0.45, 2.4], [0.69, 0.43, 1.5], [0.31, 0.72, 1.8],
+          [0.58, 0.71, 1.4], [0.1, 0.94, 1.6], [0.82, 0.91, 1.9],
+        ],
+        edges: [[0, 2], [2, 3], [3, 4], [4, 1], [3, 5], [5, 7], [3, 6], [6, 8]],
+      },
+      {
+        points: [
+          [0.08, 0.24, 1.5], [0.27, 0.72, 1.7], [0.47, 0.32, 2.2],
+          [0.67, 0.74, 1.6], [0.9, 0.25, 1.8],
+        ],
+        edges: [[0, 1], [1, 2], [2, 3], [3, 4]],
+      },
+      {
+        points: [
+          [0.08, 0.28, 1.4], [0.27, 0.64, 1.7], [0.46, 0.82, 2.1],
+          [0.65, 0.7, 1.6], [0.86, 0.59, 1.9], [0.81, 0.25, 1.5],
+          [0.59, 0.12, 1.8],
+        ],
+        edges: [[0, 1], [1, 2], [2, 3], [3, 4], [4, 5], [5, 6], [6, 3]],
+      },
+      {
+        points: [
+          [0.13, 0.51, 1.5], [0.37, 0.45, 1.8], [0.53, 0.48, 2.5],
+          [0.73, 0.39, 1.7], [0.91, 0.28, 1.4], [0.54, 0.12, 1.6],
+          [0.52, 0.84, 1.8],
+        ],
+        edges: [[0, 1], [1, 2], [2, 3], [3, 4], [5, 2], [2, 6]],
+      },
     ];
-    for (const anchor of anchors) {
-      const points = Array.from({ length: 4 + Math.floor(random() * 3) }, () => ({
-        x: anchor.x + (random() - 0.5) * 112,
-        y: anchor.y + (random() - 0.5) * 76,
-      }));
+    const placements = [
+      { x: 24, y: 14, width: 145, height: 110 },
+      { x: 250, y: 28, width: 126, height: 93 },
+      { x: 482, y: 8, width: 145, height: 102 },
+      { x: 655, y: 159, width: 122, height: 96 },
+    ];
+    for (let index = 0; index < patterns.length; index += 1) {
+      const pattern = patterns[index];
+      const placement = placements[index];
+      const centerX = placement.x + placement.width / 2;
+      const centerY = placement.y + placement.height / 2;
+      const scale = 0.88 + random() * 0.2;
+      const rotation = (random() - 0.5) * 20 * Math.PI / 180;
+      const points = pattern.points.map(([x, pointY, magnitude]) => {
+        const offsetX = (x - 0.5) * placement.width * scale;
+        const offsetY = (pointY - 0.5) * placement.height * scale;
+        return {
+          x: centerX + offsetX * Math.cos(rotation) - offsetY * Math.sin(rotation),
+          y: centerY + offsetX * Math.sin(rotation) + offsetY * Math.cos(rotation),
+          magnitude,
+        };
+      });
       const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-      path.setAttribute("d", points.map(({ x, y: pointY }, index) =>
-        `${index ? "L" : "M"}${x.toFixed(1)} ${pointY.toFixed(1)}`).join(" "));
+      path.setAttribute("d", pattern.edges.map(([from, to]) =>
+        `M${points[from].x.toFixed(1)} ${points[from].y.toFixed(1)} L${points[to].x.toFixed(1)} ${points[to].y.toFixed(1)}`).join(" "));
       path.setAttribute("class", "constellation-line");
       group.append(path);
       for (const point of points) {
         const star = document.createElementNS("http://www.w3.org/2000/svg", "circle");
         star.setAttribute("cx", point.x.toFixed(1));
         star.setAttribute("cy", point.y.toFixed(1));
-        star.setAttribute("r", (1.3 + random() * 1.8).toFixed(1));
+        star.setAttribute("r", (point.magnitude + random() * 0.4).toFixed(1));
         star.setAttribute("class", "constellation-star");
         group.append(star);
       }
