@@ -167,11 +167,91 @@ h1,h2,p { margin: 0; }
 .review-move-arrow-halo { fill: none; stroke: #f6f1e4; stroke-width: 16; stroke-linecap: round; stroke-linejoin: round; opacity: .9; }
 .review-move-arrow { fill: none; stroke: #398451; stroke-width: 8; stroke-linecap: round; stroke-linejoin: round; filter: drop-shadow(0 1px 2px #203c2e88); }
 .review-arrow-head { fill: #398451; stroke: #f6f1e4; stroke-width: 1.1; stroke-linejoin: round; }
-.square.review-candidate-from { background-image: linear-gradient(#39845135,#39845135); box-shadow: inset 0 0 0 2px #347649cc; }
-.square.review-candidate-to { background-image: radial-gradient(circle, #3984511a 0 52%,transparent 54%),linear-gradient(#39845145,#39845145); box-shadow: inset 0 0 0 2px #347649; }
+.square.review-candidate-from { background-image: linear-gradient(#3e8b5244,#3e8b5244); }
+.square.review-candidate-to { background-image: linear-gradient(#3e8b5233,#3e8b5233); }
 .square.review-threat-target::after { position: absolute; z-index: 4; inset: 11%; border: 2px solid #a93c35; border-radius: 50%; background: #c83e351c; box-shadow: inset 0 0 0 1px #fff9,0 0 0 1px #70241e66; content: ""; pointer-events: none; animation: reviewThreatPulse 2.2s ease-in-out infinite; }
 @keyframes reviewThreatPulse { 0%,100% { transform: scale(.96); opacity: .84; } 50% { transform: scale(1); opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .square.review-threat-target::after { animation: none; } }
+.square.light.board-skin-white-grove,.square.light.board-skin-black-grove { --board-light: #e8ead5; }
+.square.dark.board-skin-white-grove,.square.dark.board-skin-black-grove { --board-dark: #78906f; }
+.square.light.board-skin-white-lagoon,.square.light.board-skin-black-lagoon { --board-light: #dce9e8; }
+.square.dark.board-skin-white-lagoon,.square.dark.board-skin-black-lagoon { --board-dark: #66949a; }
+.square.light.board-skin-white-copper,.square.light.board-skin-black-copper { --board-light: #f0dfc9; }
+.square.dark.board-skin-white-copper,.square.dark.board-skin-black-copper { --board-dark: #bd7958; }
+.square.light.board-skin-white-amethyst,.square.light.board-skin-black-amethyst { --board-light: #ebe1ef; }
+.square.dark.board-skin-white-amethyst,.square.dark.board-skin-black-amethyst { --board-dark: #92799f; }
+.square.light.board-skin-white-midnight,.square.light.board-skin-black-midnight { --board-light: #cbd2df; }
+.square.dark.board-skin-white-midnight,.square.dark.board-skin-black-midnight { --board-dark: #4c5c78; }
+.square.light.board-skin-white-rosewood,.square.light.board-skin-black-rosewood { --board-light: #f1ddd5; }
+.square.dark.board-skin-white-rosewood,.square.dark.board-skin-black-rosewood { --board-dark: #9a5c55; }
+.square.light.board-skin-white-monochrome,.square.light.board-skin-black-monochrome { --board-light: #f2f2f0; }
+.square.dark.board-skin-white-monochrome,.square.dark.board-skin-black-monochrome { --board-dark: #282a30; }
+.square.light.board-skin-white-nebula,.square.light.board-skin-black-nebula { --board-light: #e5ddef; background-image: radial-gradient(circle at 15% 19%,#9a793d 0 1px,transparent 1.8px),radial-gradient(circle at 79% 26%,#75648f 0 1px,transparent 1.8px),radial-gradient(circle at 72% 82%,#9a793d 0 1px,transparent 1.8px),radial-gradient(circle at 24% 72%,#75648f 0 1px,transparent 1.8px),radial-gradient(ellipse at center,transparent 39%,#ac8f5e42 45%,transparent 49%); }
+.square.dark.board-skin-white-nebula,.square.dark.board-skin-black-nebula { --board-dark: #34284d; background-image: radial-gradient(circle at 15% 19%,#f3d996 0 1px,transparent 1.8px),radial-gradient(circle at 79% 26%,#ded2ff 0 1px,transparent 1.8px),radial-gradient(circle at 72% 82%,#f3d996 0 1px,transparent 1.8px),radial-gradient(circle at 24% 72%,#ded2ff 0 1px,transparent 1.8px),radial-gradient(ellipse at center,transparent 39%,#d4b76850 45%,transparent 49%); }
+.piece.skin-white-ivory,.drag-piece.skin-white-ivory { color: #fff2c6; -webkit-text-stroke: .65px #806438; }
+.piece.skin-black-ivory,.drag-piece.skin-black-ivory { color: #755125; }
+.piece.skin-white-onyx,.drag-piece.skin-white-onyx { color: #f5f5f2; -webkit-text-stroke: .65px #53606b; }
+.piece.skin-black-onyx,.drag-piece.skin-black-onyx { color: #17212b; }
+.piece.skin-white-jade,.drag-piece.skin-white-jade { color: #e6f4d9; -webkit-text-stroke: .65px #507456; }
+.piece.skin-black-jade,.drag-piece.skin-black-jade { color: #315d46; }
+.piece.skin-white-sapphire,.drag-piece.skin-white-sapphire { color: #e1edff; -webkit-text-stroke: .65px #45648c; }
+.piece.skin-black-sapphire,.drag-piece.skin-black-sapphire { color: #284c80; }
+.piece.skin-white-rose,.drag-piece.skin-white-rose { color: #fff0ed; -webkit-text-stroke: .65px #89585f; }
+.piece.skin-black-rose,.drag-piece.skin-black-rose { color: #78454d; }
+.piece.skin-white-spatial,.piece.skin-black-spatial,
+.piece.skin-white-chessnut,.piece.skin-black-chessnut,
+.piece.skin-white-golden,.piece.skin-black-golden,
+.drag-piece.skin-white-spatial,.drag-piece.skin-black-spatial,
+.drag-piece.skin-white-chessnut,.drag-piece.skin-black-chessnut,
+.drag-piece.skin-white-golden,.drag-piece.skin-black-golden,
+.demo-spatial,.demo-chessnut,.demo-golden {
+  color: transparent; -webkit-text-stroke: 0; text-shadow: none;
+  background-position: center; background-repeat: no-repeat; background-size: contain;
+}
+.piece.skin-white-spatial,.piece.skin-black-spatial,
+.piece.skin-white-chessnut,.piece.skin-black-chessnut,
+.piece.skin-white-golden,.piece.skin-black-golden { height: 100%; aspect-ratio: 1; font-size: 0; }
+.drag-piece.skin-white-spatial,.drag-piece.skin-black-spatial,
+.drag-piece.skin-white-chessnut,.drag-piece.skin-black-chessnut,
+.drag-piece.skin-white-golden,.drag-piece.skin-black-golden { font-size: 0; }
+.skin-white-spatial[data-piece="wk"],.demo-spatial[data-piece="wk"] { background-image: url("/skins/spatial/wK.svg"); }
+.skin-white-spatial[data-piece="wq"],.demo-spatial[data-piece="wq"] { background-image: url("/skins/spatial/wQ.svg"); }
+.skin-white-spatial[data-piece="wr"],.demo-spatial[data-piece="wr"] { background-image: url("/skins/spatial/wR.svg"); }
+.skin-white-spatial[data-piece="wb"],.demo-spatial[data-piece="wb"] { background-image: url("/skins/spatial/wB.svg"); }
+.skin-white-spatial[data-piece="wn"],.demo-spatial[data-piece="wn"] { background-image: url("/skins/spatial/wN.svg"); }
+.skin-white-spatial[data-piece="wp"],.demo-spatial[data-piece="wp"] { background-image: url("/skins/spatial/wP.svg"); }
+.skin-black-spatial[data-piece="bk"],.demo-spatial[data-piece="bk"] { background-image: url("/skins/spatial/bK.svg"); }
+.skin-black-spatial[data-piece="bq"],.demo-spatial[data-piece="bq"] { background-image: url("/skins/spatial/bQ.svg"); }
+.skin-black-spatial[data-piece="br"],.demo-spatial[data-piece="br"] { background-image: url("/skins/spatial/bR.svg"); }
+.skin-black-spatial[data-piece="bb"],.demo-spatial[data-piece="bb"] { background-image: url("/skins/spatial/bB.svg"); }
+.skin-black-spatial[data-piece="bn"],.demo-spatial[data-piece="bn"] { background-image: url("/skins/spatial/bN.svg"); }
+.skin-black-spatial[data-piece="bp"],.demo-spatial[data-piece="bp"] { background-image: url("/skins/spatial/bP.svg"); }
+.skin-white-chessnut[data-piece="wk"],.demo-chessnut[data-piece="wk"] { background-image: url("/skins/chessnut/wK.svg"); }
+.skin-white-chessnut[data-piece="wq"],.demo-chessnut[data-piece="wq"] { background-image: url("/skins/chessnut/wQ.svg"); }
+.skin-white-chessnut[data-piece="wr"],.demo-chessnut[data-piece="wr"] { background-image: url("/skins/chessnut/wR.svg"); }
+.skin-white-chessnut[data-piece="wb"],.demo-chessnut[data-piece="wb"] { background-image: url("/skins/chessnut/wB.svg"); }
+.skin-white-chessnut[data-piece="wn"],.demo-chessnut[data-piece="wn"] { background-image: url("/skins/chessnut/wN.svg"); }
+.skin-white-chessnut[data-piece="wp"],.demo-chessnut[data-piece="wp"] { background-image: url("/skins/chessnut/wP.svg"); }
+.skin-black-chessnut[data-piece="bk"],.demo-chessnut[data-piece="bk"] { background-image: url("/skins/chessnut/bK.svg"); }
+.skin-black-chessnut[data-piece="bq"],.demo-chessnut[data-piece="bq"] { background-image: url("/skins/chessnut/bQ.svg"); }
+.skin-black-chessnut[data-piece="br"],.demo-chessnut[data-piece="br"] { background-image: url("/skins/chessnut/bR.svg"); }
+.skin-black-chessnut[data-piece="bb"],.demo-chessnut[data-piece="bb"] { background-image: url("/skins/chessnut/bB.svg"); }
+.skin-black-chessnut[data-piece="bn"],.demo-chessnut[data-piece="bn"] { background-image: url("/skins/chessnut/bN.svg"); }
+.skin-black-chessnut[data-piece="bp"],.demo-chessnut[data-piece="bp"] { background-image: url("/skins/chessnut/bP.svg"); }
+.skin-white-golden[data-piece="wk"],.demo-golden[data-piece="wk"] { background-image: url("/skins/fantasy/wK.svg"); }
+.skin-white-golden[data-piece="wq"],.demo-golden[data-piece="wq"] { background-image: url("/skins/fantasy/wQ.svg"); }
+.skin-white-golden[data-piece="wr"],.demo-golden[data-piece="wr"] { background-image: url("/skins/fantasy/wR.svg"); }
+.skin-white-golden[data-piece="wb"],.demo-golden[data-piece="wb"] { background-image: url("/skins/fantasy/wB.svg"); }
+.skin-white-golden[data-piece="wn"],.demo-golden[data-piece="wn"] { background-image: url("/skins/fantasy/wN.svg"); }
+.skin-white-golden[data-piece="wp"],.demo-golden[data-piece="wp"] { background-image: url("/skins/fantasy/wP.svg"); }
+.skin-black-golden[data-piece="bk"],.demo-golden[data-piece="bk"] { background-image: url("/skins/fantasy/bK.svg"); }
+.skin-black-golden[data-piece="bq"],.demo-golden[data-piece="bq"] { background-image: url("/skins/fantasy/bQ.svg"); }
+.skin-black-golden[data-piece="br"],.demo-golden[data-piece="br"] { background-image: url("/skins/fantasy/bR.svg"); }
+.skin-black-golden[data-piece="bb"],.demo-golden[data-piece="bb"] { background-image: url("/skins/fantasy/bB.svg"); }
+.skin-black-golden[data-piece="bn"],.demo-golden[data-piece="bn"] { background-image: url("/skins/fantasy/bN.svg"); }
+.skin-black-golden[data-piece="bp"],.demo-golden[data-piece="bp"] { background-image: url("/skins/fantasy/bP.svg"); }
+.skin-white-golden,.demo-golden.demo-white { filter: sepia(1) saturate(4) hue-rotate(2deg) brightness(1.18); }
+.skin-black-golden,.demo-golden.demo-black { filter: sepia(.85) saturate(4) hue-rotate(2deg) brightness(.68); }
 .empty-history { display: grid; place-content: center; min-height: 65px; text-align: center; color: #77766f; font-size: 9px; line-height: 1.6; }
 .empty-history span { color: var(--violet); font-size: 17px; }
 .action-row { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0,1fr) minmax(58px,.65fr) minmax(58px,.6fr) 46px; gap: 8px; min-width: 0; }

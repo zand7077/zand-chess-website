@@ -15,6 +15,16 @@ let inviteTimeResolver = null;
 const notifiedInvitationCodes = new Set();
 const pendingInvitationPrompts = [];
 let activeInvitationPrompt = null;
+let activeView = "home";
+let shopState = null;
+const ownerSkinPreview = [{
+  id: "golden",
+  name: "Golden Sovereign",
+  price: 0,
+  owned: false,
+  equipped: false,
+  ownerOnly: true,
+}];
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -400,6 +410,7 @@ async function loadGlobalChat() {
 function setAccountView(user) {
   signedInUser = user;
   friendIds = new Set();
+  shopState = null;
   const signedIn = Boolean(user);
   accountPanel.classList.toggle("hidden", signedIn);
   friendsPanel.classList.toggle("hidden", !signedIn);
@@ -407,6 +418,7 @@ function setAccountView(user) {
   document.querySelector("#global-chat-form").classList.toggle("hidden", !signedIn);
   document.querySelector("#global-chat-login").classList.toggle("hidden", signedIn);
   void loadGlobalChat();
+  if (activeView === "shop") void loadShop();
   if (signedIn) {
     document.querySelector("#welcome-name").textContent = `Hello, ${user.username}`;
     loadDashboard();
@@ -417,6 +429,155 @@ function setAccountView(user) {
     dashboardTimer = null;
   }
   loadLeaderboard();
+}
+
+function setLobbyView(view) {
+  activeView = view;
+  document.querySelector("#home-content").classList.toggle("hidden", view !== "home");
+  document.querySelector("#global-chat-panel").classList.toggle("hidden", view !== "chat");
+  document.querySelector("#shop-panel").classList.toggle("hidden", view !== "shop");
+  const chatToggle = document.querySelector("#global-chat-toggle");
+  chatToggle.textContent = view === "chat" ? "Home" : "Global chat";
+  chatToggle.setAttribute("aria-pressed", String(view === "chat"));
+  const shopToggle = document.querySelector("#shop-toggle");
+  shopToggle.textContent = view === "shop" ? "Home" : "Shop";
+  shopToggle.setAttribute("aria-pressed", String(view === "shop"));
+  if (globalChatTimer) {
+    clearInterval(globalChatTimer);
+    globalChatTimer = null;
+  }
+  if (view === "chat") {
+    void loadGlobalChat();
+    globalChatTimer = window.setInterval(loadGlobalChat, 3000);
+    document.querySelector("#global-chat-input").focus();
+  } else if (view === "shop") {
+    void loadShop();
+  }
+}
+
+function renderSkinCards(type, container, skins = shopState.skins[type]) {
+  container.replaceChildren();
+  for (const skin of skins) {
+    const card = document.createElement("article");
+    card.className = `skin-card${skin.equipped ? " equipped" : ""}`;
+    const preview = document.createElement("div");
+    if (type === "board") {
+      preview.className = `skin-preview board-preview board-preview-${skin.id}`;
+      preview.setAttribute("aria-hidden", "true");
+    } else {
+      preview.className = `skin-preview piece-preview piece-preview-${skin.id}`;
+      preview.setAttribute("aria-hidden", "true");
+      for (const [className, symbol, pieceCode] of [
+        ["demo-white", "♔", "wk"], ["demo-black", "♚", "bk"],
+        ["demo-white", "♘", "wn"], ["demo-black", "♞", "bn"],
+      ]) {
+        const piece = document.createElement("span");
+        piece.className = `${className} demo-${skin.id}`;
+        piece.dataset.piece = pieceCode;
+        piece.textContent = symbol;
+        preview.append(piece);
+      }
+    }
+    const copy = document.createElement("div");
+    copy.className = "skin-card-copy";
+    const name = document.createElement("strong");
+    name.textContent = skin.name;
+    const price = document.createElement("span");
+    price.textContent = skin.ownerOnly
+      ? skin.owned ? "Owner exclusive" : ""
+      : skin.price ? `${skin.price} coins` : "Included";
+    price.hidden = Boolean(skin.ownerOnly && !skin.owned);
+    copy.append(name, price);
+    const locked = Boolean(skin.ownerOnly && !skin.owned);
+    const actionLabel = skin.equipped
+      ? "Equipped"
+      : locked ? "Owner only"
+        : skin.owned ? "Equip" : `Buy · ${skin.price} coins`;
+    const action = button(
+      actionLabel,
+      async () => {
+        action.disabled = true;
+        try {
+          const endpoint = skin.ownerOnly || skin.owned ? "equip" : "purchase";
+          shopState = await api(`/api/shop/${endpoint}`, {
+            method: "POST",
+            body: JSON.stringify({ type, skinId: skin.id }),
+          });
+          renderShop();
+          shopStatus(`${skin.owned ? "Equipped" : "Purchased"} ${skin.name}.`);
+        } catch (error) {
+          action.disabled = false;
+          shopStatus(error.message);
+        }
+      },
+      skin.equipped,
+    );
+    action.classList.add("skin-card-action");
+    action.disabled = skin.equipped || locked;
+    const actions = document.createElement("div");
+    actions.className = `skin-card-actions${skin.ownerOnly ? " single" : ""}`;
+    actions.append(action);
+    if (!skin.ownerOnly) {
+      const tryButton = button("Try out", async () => {
+        tryButton.disabled = true;
+        try {
+          const game = await api("/api/bot-games", {
+            method: "POST",
+            body: JSON.stringify({ botElo: 200 }),
+          });
+          window.location.href = `${game.url}&try=${encodeURIComponent(`${type}:${skin.id}`)}`;
+        } catch (error) {
+          tryButton.disabled = false;
+          shopStatus(error.message);
+        }
+      });
+      tryButton.classList.add("skin-card-action", "try-skin-button");
+      actions.append(tryButton);
+    }
+    card.append(preview, copy, actions);
+    container.append(card);
+  }
+}
+
+function shopStatus(text) {
+  document.querySelector("#shop-status").textContent = text;
+}
+
+function renderShop() {
+  const signedIn = Boolean(signedInUser && shopState);
+  document.querySelector("#shop-login").classList.toggle("hidden", Boolean(signedInUser));
+  document.querySelector("#shop-account").classList.toggle("hidden", !signedIn);
+  renderSkinCards(
+    "piece",
+    document.querySelector("#owner-skin-list"),
+    shopState?.specialSkins || ownerSkinPreview,
+  );
+  if (!signedIn) return;
+  document.querySelector("#shop-coins").textContent = String(shopState.coins);
+  const claimButton = document.querySelector("#claim-daily-coins");
+  claimButton.disabled = !shopState.canClaimDaily;
+  claimButton.textContent = shopState.canClaimDaily
+    ? `Collect ${shopState.dailyReward} daily coins`
+    : "Daily coins collected";
+  renderSkinCards("board", document.querySelector("#board-skin-list"));
+  renderSkinCards("piece", document.querySelector("#piece-skin-list"));
+}
+
+async function loadShop() {
+  const login = document.querySelector("#shop-login");
+  const account = document.querySelector("#shop-account");
+  if (!signedInUser) {
+    login.classList.remove("hidden");
+    account.classList.add("hidden");
+    renderShop();
+    return;
+  }
+  try {
+    shopState = await api("/api/shop");
+    renderShop();
+  } catch (error) {
+    shopStatus(error.message);
+  }
 }
 
 async function loadDashboard() {
@@ -700,20 +861,26 @@ document.querySelector("#close-invite-time").addEventListener("click", () => {
 document.querySelector("#invite-time-modal").addEventListener("click", (event) => {
   if (event.target.id === "invite-time-modal") closeInviteTimePicker();
 });
-document.querySelector("#global-chat-toggle").addEventListener("click", (event) => {
-  const isOpening = document.querySelector("#global-chat-panel").classList.contains("hidden");
-  document.querySelector("#home-content").classList.toggle("hidden", isOpening);
-  document.querySelector("#global-chat-panel").classList.toggle("hidden", !isOpening);
-  event.currentTarget.setAttribute("aria-pressed", String(isOpening));
-  event.currentTarget.textContent = isOpening ? "Home" : "Global chat";
-  if (globalChatTimer) {
-    clearInterval(globalChatTimer);
-    globalChatTimer = null;
-  }
-  if (isOpening) {
-    void loadGlobalChat();
-    globalChatTimer = window.setInterval(loadGlobalChat, 3000);
-    document.querySelector("#global-chat-input").focus();
+document.querySelector("#global-chat-toggle").addEventListener("click", () => {
+  setLobbyView(activeView === "chat" ? "home" : "chat");
+});
+document.querySelector("#shop-toggle").addEventListener("click", () => {
+  setLobbyView(activeView === "shop" ? "home" : "shop");
+});
+document.querySelector("#shop-sign-in").addEventListener("click", () => {
+  setLobbyView("home");
+  document.querySelector("#username-input").focus();
+});
+document.querySelector("#claim-daily-coins").addEventListener("click", async (event) => {
+  const claimButton = event.currentTarget;
+  claimButton.disabled = true;
+  try {
+    shopState = await api("/api/shop/daily", { method: "POST", body: "{}" });
+    renderShop();
+    shopStatus(`${shopState.dailyReward} coins added to your balance.`);
+  } catch (error) {
+    shopStatus(error.message);
+    claimButton.disabled = false;
   }
 });
 document.querySelector("#global-chat-sign-in").addEventListener("click", () => {

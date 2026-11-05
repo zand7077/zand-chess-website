@@ -44,6 +44,28 @@ chat log with animated typing indicators and speech bubbles above each
 player's avatar. On phones, use the floating **Chat** button to open the game
 chat without scrolling; one-tap quick messages are available there as well.
 
+Open **Shop** in the lobby to collect 100 free coins once per UTC day and unlock
+board-half color themes and piece sets, including the 500-coin Celestial Atlas
+board theme with its star-map detailing and premium Spatial and Chessnut art
+sets.
+Purchased cosmetics and your balance are saved to your account. Guests can
+play as before, but need an account to collect coins or use the shop.
+
+The shop's Golden Sovereign collection is visible to visitors but reserved for
+the account named `zand`. Its golden pieces recolor Maurizio Monge's Fantasy
+set. Spatial is by Maurizio Monge and distributed under MIT; Chessnut is by
+Alexis Luengas and distributed under Apache 2.0. See the bundled
+[MIT license](./public/skins/CHESS-ART-LICENSE.txt),
+[Apache license](./public/skins/CHESSNUT-LICENSE.txt), and source projects
+([chess-art](https://github.com/maurimo/chess-art),
+[chessnut-pieces](https://github.com/LexLuengas/chessnut-pieces)).
+
+Completed games award coins to the winning account after at least eight plies.
+Bot wins grant 1, 3, or 5 coins at 200, 1000, or 1600 Elo, respectively, with a
+10-coin daily bot cap. Human wins grant 8–30 coins based on the opponent's Elo,
+with a 90-coin daily cap and one reward per opponent per UTC day. Draws, losses,
+guest winners, and short games do not earn game coins.
+
 Usernames must be 3–20 letters, numbers, or underscores. Passwords must be at
 least 10 characters. Friend requests must be accepted before either player can
 send a friend invitation. New accounts start at 800 Elo. For games between two

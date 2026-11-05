@@ -17,8 +17,16 @@ const gradeIcons = {
 const pieceValues = { p: 1, n: 3, b: 3, r: 5, q: 9 };
 const boardElement = document.querySelector("#board");
 const toastElement = document.querySelector("#toast");
+const trySkinMatch = new URLSearchParams(window.location.search)
+  .get("try")?.match(/^(board|piece):([a-z0-9-]+)$/);
+if (trySkinMatch) {
+  const cleanUrl = new URL(window.location.href);
+  cleanUrl.searchParams.delete("try");
+  window.history.replaceState(null, "", cleanUrl);
+}
 const state = {
   game: null,
+  trySkin: trySkinMatch ? { type: trySkinMatch[1], id: trySkinMatch[2] } : null,
   roomCode: new URLSearchParams(window.location.search).get("room")?.toUpperCase() || "",
   isSpectator: new URLSearchParams(window.location.search).get("spectate") === "1",
   selected: null,
@@ -290,6 +298,14 @@ function squareName(row, col) {
   return `${"abcdefgh"[col]}${8 - row}`;
 }
 
+function pieceSkinClass(color) {
+  const side = color === "w" ? "white" : "black";
+  const skin = color === "w" && state.trySkin?.type === "piece"
+    ? state.trySkin.id
+    : state.game?.[`${side}PieceSkin`] || "classic";
+  return skin === "classic" ? "" : `skin-${side}-${skin}`;
+}
+
 function squareCoords(name) {
   return { row: 8 - Number(name[1]), col: name.charCodeAt(0) - 97 };
 }
@@ -352,7 +368,9 @@ function startPieceDrag(drag, x, y) {
   drag.started = true;
   const pieceCode = state.game.board[squareCoords(drag.from).row][squareCoords(drag.from).col];
   const ghost = document.createElement("span");
-  ghost.className = `drag-piece ${pieceCode[0] === "w" ? "white" : "black"}`;
+  const color = pieceCode[0] === "w" ? "white" : "black";
+  ghost.className = `drag-piece ${color} ${pieceSkinClass(pieceCode[0])}`;
+  ghost.dataset.piece = pieceCode;
   ghost.textContent = symbols[pieceCode];
   document.body.append(ghost);
   drag.ghost = ghost;
@@ -543,6 +561,13 @@ function setBoardOrientation() {
       square.style.gridRow = String(displayRow + 1);
       square.style.gridColumn = String(displayCol + 1);
       square.className = `square ${(row + col) % 2 === 0 ? "light" : "dark"}`;
+      const boardSide = row >= 4 ? "white" : "black";
+      const boardSkin = boardSide === "white" && state.trySkin?.type === "board"
+        ? state.trySkin.id
+        : state.game[`${boardSide}BoardSkin`] || "classic";
+      if (boardSkin !== "classic") {
+        square.classList.add(`board-skin-${boardSide}-${boardSkin}`);
+      }
       square.dataset.square = name;
       squares.set(name, square);
       square.setAttribute("aria-label", `${pieceCode ? `${pieceCode[0] === "w" ? "White" : "Black"} ${pieceCode[1]}` : "Empty"} ${name}`);
@@ -599,8 +624,9 @@ function setBoardOrientation() {
       parts.file.hidden = displayRow !== 7;
       parts.dot.hidden = !legalDestinations.has(name) || Boolean(pieceCode);
       parts.piece.textContent = pieceCode ? symbols[pieceCode] : "";
+      parts.piece.dataset.piece = pieceCode || "";
       parts.piece.className = pieceCode
-        ? `piece ${pieceCode[0] === "w" ? "white" : "black"}`
+        ? `piece ${pieceCode[0] === "w" ? "white" : "black"} ${pieceSkinClass(pieceCode[0])}`
         : "piece";
       if (isReviewing && selectedCandidate?.from === name) {
         parts.piece.classList.add("review-candidate-piece");
@@ -1287,6 +1313,9 @@ async function updateGame(next, animate = false) {
     state.reviewPly = null;
   }
   render();
+  if (!previousGameOver && next.over && next.coinsEarned > 0) {
+    showToast(`You earned ${next.coinsEarned} coins for this win!`);
+  }
   if (highlightedGrade) showGradePopup(highlightedGrade);
   if (animate && next.lastMove?.captured && next.lastMove !== oldLastMove) animateCapture();
   if (state.premoves.length && next.status === "active" && !next.over &&

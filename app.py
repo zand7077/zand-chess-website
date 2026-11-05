@@ -7,6 +7,7 @@ import re
 import secrets
 import sqlite3
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +32,38 @@ TIME_CONTROLS = {
     "rapid_15_10": {"label": "Rapid · 15+10", "seconds": 900, "increment": 10},
 }
 BOT_ELOS = {200, 1000, 1600}
+DAILY_COIN_REWARD = 100
+BOT_GAME_COIN_REWARDS = {200: 1, 1000: 3, 1600: 5}
+BOT_GAME_DAILY_CAP = 10
+PLAYER_GAME_DAILY_CAP = 90
+MIN_REWARDED_GAME_PLIES = 8
+OWNER_USERNAME = "zand"
+SHOP_SKINS = {
+    "board": (
+        {"id": "classic", "name": "Stone & Slate", "price": 0},
+        {"id": "grove", "name": "Moss Grove", "price": 100},
+        {"id": "lagoon", "name": "Blue Lagoon", "price": 100},
+        {"id": "copper", "name": "Copper Field", "price": 100},
+        {"id": "amethyst", "name": "Amethyst", "price": 100},
+        {"id": "midnight", "name": "Midnight", "price": 100},
+        {"id": "rosewood", "name": "Rosewood", "price": 100},
+        {"id": "monochrome", "name": "Monochrome", "price": 100},
+        {"id": "nebula", "name": "Celestial Atlas", "price": 500},
+    ),
+    "piece": (
+        {"id": "classic", "name": "Classic Ivory", "price": 0},
+        {"id": "ivory", "name": "Gilded Ivory", "price": 100},
+        {"id": "onyx", "name": "Onyx & Pearl", "price": 100},
+        {"id": "jade", "name": "Jade", "price": 100},
+        {"id": "sapphire", "name": "Sapphire", "price": 100},
+        {"id": "rose", "name": "Rose Quartz", "price": 100},
+        {"id": "spatial", "name": "Spatial", "price": 500},
+        {"id": "chessnut", "name": "Chessnut", "price": 500},
+    ),
+}
+OWNER_SPECIAL_SKINS = (
+    {"id": "golden", "name": "Golden Sovereign", "price": 0},
+)
 
 
 def bot_display_name(elo: int) -> str:
@@ -244,7 +277,18 @@ def initialize_database(backend: str, config: dict[str, Any]) -> None:
                     username TEXT NOT NULL UNIQUE COLLATE NOCASE,
                     password_hash TEXT NOT NULL,
                     rating INTEGER NOT NULL DEFAULT 800,
+                    coins INTEGER NOT NULL DEFAULT 0,
+                    daily_claim_date TEXT,
+                    board_skin TEXT NOT NULL DEFAULT 'classic',
+                    piece_skin TEXT NOT NULL DEFAULT 'classic',
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE TABLE IF NOT EXISTS user_skins (
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    skin_type TEXT NOT NULL CHECK(skin_type IN ('board', 'piece')),
+                    skin_id TEXT NOT NULL,
+                    acquired_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY(user_id, skin_type, skin_id)
                 );
                 CREATE TABLE IF NOT EXISTS friend_requests (
                     id INTEGER PRIMARY KEY,
@@ -282,10 +326,25 @@ def initialize_database(backend: str, config: dict[str, Any]) -> None:
                     white_last_seen_at INTEGER,
                     black_last_seen_at INTEGER,
                     rematch_requested_by TEXT,
+                    game_round INTEGER NOT NULL DEFAULT 1,
                     result TEXT,
                     status TEXT NOT NULL CHECK(status IN ('waiting', 'active', 'completed')),
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
+                CREATE TABLE IF NOT EXISTS coin_game_rewards (
+                    game_id INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+                    game_round INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    opponent_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                    amount INTEGER NOT NULL CHECK(amount > 0),
+                    source TEXT NOT NULL CHECK(source IN ('bot', 'player')),
+                    reward_day TEXT NOT NULL,
+                    PRIMARY KEY(game_id, game_round, user_id)
+                );
+                CREATE INDEX IF NOT EXISTS coin_game_rewards_user_day
+                    ON coin_game_rewards(user_id, reward_day, source);
+                CREATE INDEX IF NOT EXISTS coin_game_rewards_opponent_day
+                    ON coin_game_rewards(user_id, opponent_user_id, reward_day);
                 CREATE TABLE IF NOT EXISTS global_chat_messages (
                     id INTEGER PRIMARY KEY,
                     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -311,10 +370,15 @@ def initialize_database(backend: str, config: dict[str, Any]) -> None:
             user_columns = {
                 row[1] for row in connection.execute("PRAGMA table_info(users)")
             }
-            if "rating" not in user_columns:
-                connection.execute(
-                    "ALTER TABLE users ADD COLUMN rating INTEGER NOT NULL DEFAULT 800"
-                )
+            for name, definition in (
+                ("rating", "INTEGER NOT NULL DEFAULT 800"),
+                ("coins", "INTEGER NOT NULL DEFAULT 0"),
+                ("daily_claim_date", "TEXT"),
+                ("board_skin", "TEXT NOT NULL DEFAULT 'classic'"),
+                ("piece_skin", "TEXT NOT NULL DEFAULT 'classic'"),
+            ):
+                if name not in user_columns:
+                    connection.execute(f"ALTER TABLE users ADD COLUMN {name} {definition}")
             game_columns = {
                 row[1] for row in connection.execute("PRAGMA table_info(games)")
             }
@@ -333,6 +397,7 @@ def initialize_database(backend: str, config: dict[str, Any]) -> None:
                 "white_last_seen_at": "INTEGER",
                 "black_last_seen_at": "INTEGER",
                 "rematch_requested_by": "TEXT",
+                "game_round": "INTEGER NOT NULL DEFAULT 1",
             }
             for name, definition in column_types.items():
                 if name not in game_columns:
@@ -356,6 +421,17 @@ def initialize_database(backend: str, config: dict[str, Any]) -> None:
                 "CREATE INDEX IF NOT EXISTS room_chat_room_created "
                 "ON room_chat_messages (room_code, id DESC)"
             )
+            connection.execute(
+                "UPDATE users SET piece_skin = 'classic' WHERE piece_skin = 'kiwen-suwi'"
+            )
+            connection.execute(
+                "DELETE FROM user_skins WHERE skin_type = 'piece' AND skin_id = 'kiwen-suwi'"
+            )
+            migrate_replaced_piece_skins(
+                DatabaseConnection(connection, "sqlite")
+            )
+            migrate_removed_board_skin(DatabaseConnection(connection, "sqlite"))
+            connection.commit()
         finally:
             connection.close()
         return
@@ -369,7 +445,20 @@ def initialize_database(backend: str, config: dict[str, Any]) -> None:
                 username VARCHAR(20) NOT NULL UNIQUE,
                 password_hash TEXT NOT NULL,
                 rating INTEGER NOT NULL DEFAULT 800,
+                coins INTEGER NOT NULL DEFAULT 0,
+                daily_claim_date VARCHAR(10),
+                board_skin VARCHAR(24) NOT NULL DEFAULT 'classic',
+                piece_skin VARCHAR(24) NOT NULL DEFAULT 'classic',
                 created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS user_skins (
+                user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                skin_type VARCHAR(8) NOT NULL CHECK(skin_type IN ('board', 'piece')),
+                skin_id VARCHAR(24) NOT NULL,
+                acquired_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY(user_id, skin_type, skin_id)
             )
             """,
             """
@@ -413,11 +502,26 @@ def initialize_database(backend: str, config: dict[str, Any]) -> None:
                 white_last_seen_at BIGINT,
                 black_last_seen_at BIGINT,
                 rematch_requested_by VARCHAR(1),
+                game_round INTEGER NOT NULL DEFAULT 1,
                 result VARCHAR(255),
                 status VARCHAR(16) NOT NULL CHECK(status IN ('waiting', 'active', 'completed')),
                 created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
             """,
+            """
+            CREATE TABLE IF NOT EXISTS coin_game_rewards (
+                game_id BIGINT NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+                game_round INTEGER NOT NULL,
+                user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                opponent_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+                amount INTEGER NOT NULL CHECK(amount > 0),
+                source VARCHAR(8) NOT NULL CHECK(source IN ('bot', 'player')),
+                reward_day VARCHAR(10) NOT NULL,
+                PRIMARY KEY(game_id, game_round, user_id)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS coin_game_rewards_user_day ON coin_game_rewards (user_id, reward_day, source)",
+            "CREATE INDEX IF NOT EXISTS coin_game_rewards_opponent_day ON coin_game_rewards (user_id, opponent_user_id, reward_day)",
             """
             CREATE TABLE IF NOT EXISTS global_chat_messages (
                 id BIGSERIAL PRIMARY KEY,
@@ -446,12 +550,17 @@ def initialize_database(backend: str, config: dict[str, Any]) -> None:
             """,
             "CREATE UNIQUE INDEX IF NOT EXISTS users_username_lower_unique ON users (LOWER(username))",
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS rating INTEGER NOT NULL DEFAULT 800",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS coins INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS daily_claim_date VARCHAR(10)",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS board_skin VARCHAR(24) NOT NULL DEFAULT 'classic'",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS piece_skin VARCHAR(24) NOT NULL DEFAULT 'classic'",
             "ALTER TABLE games ADD COLUMN IF NOT EXISTS rating_changes_json TEXT",
             "ALTER TABLE games ADD COLUMN IF NOT EXISTS creator_side VARCHAR(1) NOT NULL DEFAULT 'w'",
             "ALTER TABLE games ADD COLUMN IF NOT EXISTS bot_elo INTEGER",
             "ALTER TABLE games ADD COLUMN IF NOT EXISTS white_last_seen_at BIGINT",
             "ALTER TABLE games ADD COLUMN IF NOT EXISTS black_last_seen_at BIGINT",
             "ALTER TABLE games ADD COLUMN IF NOT EXISTS rematch_requested_by VARCHAR(1)",
+            "ALTER TABLE games ADD COLUMN IF NOT EXISTS game_round INTEGER NOT NULL DEFAULT 1",
             "CREATE INDEX IF NOT EXISTS games_white_user_status_created ON games (white_user_id, status, created_at DESC, id DESC)",
             "CREATE INDEX IF NOT EXISTS games_black_user_status_created ON games (black_user_id, status, created_at DESC, id DESC)",
             "CREATE INDEX IF NOT EXISTS games_status_created ON games (status, created_at DESC)",
@@ -462,6 +571,16 @@ def initialize_database(backend: str, config: dict[str, Any]) -> None:
         try:
             for statement in schema:
                 connection.execute(statement)
+            connection.execute(
+                "UPDATE users SET piece_skin = 'classic' WHERE piece_skin = ?",
+                ("kiwen-suwi",),
+            )
+            connection.execute(
+                "DELETE FROM user_skins WHERE skin_type = ? AND skin_id = ?",
+                ("piece", "kiwen-suwi"),
+            )
+            migrate_replaced_piece_skins(connection)
+            migrate_removed_board_skin(connection)
             connection.commit()
         finally:
             connection.close()
@@ -475,7 +594,21 @@ def initialize_database(backend: str, config: dict[str, Any]) -> None:
             username_key VARCHAR(20) GENERATED ALWAYS AS (LOWER(username)) STORED UNIQUE,
             password_hash TEXT NOT NULL,
             rating INTEGER NOT NULL DEFAULT 800,
+            coins INTEGER NOT NULL DEFAULT 0,
+            daily_claim_date VARCHAR(10),
+            board_skin VARCHAR(24) NOT NULL DEFAULT 'classic',
+            piece_skin VARCHAR(24) NOT NULL DEFAULT 'classic',
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS user_skins (
+            user_id BIGINT NOT NULL,
+            skin_type VARCHAR(8) NOT NULL,
+            skin_id VARCHAR(24) NOT NULL,
+            acquired_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY(user_id, skin_type, skin_id),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )
         """,
         """
@@ -521,12 +654,30 @@ def initialize_database(backend: str, config: dict[str, Any]) -> None:
             white_last_seen_at BIGINT,
             black_last_seen_at BIGINT,
             rematch_requested_by VARCHAR(1),
+            game_round INTEGER NOT NULL DEFAULT 1,
             result VARCHAR(255),
             status VARCHAR(16) NOT NULL,
             created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (white_user_id) REFERENCES users(id) ON DELETE SET NULL,
             FOREIGN KEY (black_user_id) REFERENCES users(id) ON DELETE SET NULL,
             FOREIGN KEY (invited_user_id) REFERENCES users(id) ON DELETE SET NULL
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS coin_game_rewards (
+            game_id BIGINT NOT NULL,
+            game_round INTEGER NOT NULL,
+            user_id BIGINT NOT NULL,
+            opponent_user_id BIGINT NULL,
+            amount INTEGER NOT NULL,
+            source VARCHAR(8) NOT NULL,
+            reward_day VARCHAR(10) NOT NULL,
+            PRIMARY KEY(game_id, game_round, user_id),
+            KEY coin_game_rewards_user_day (user_id, reward_day, source),
+            KEY coin_game_rewards_opponent_day (user_id, opponent_user_id, reward_day),
+            FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (opponent_user_id) REFERENCES users(id) ON DELETE SET NULL
         )
         """,
         """
@@ -565,6 +716,26 @@ def initialize_database(backend: str, config: dict[str, Any]) -> None:
         for statement in schema:
             connection.execute(statement)
         if backend == "postgres":
+            user_columns = {
+                row["column_name"] for row in connection.execute(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_schema = current_schema() AND table_name = 'users'"
+                ).fetchall()
+            }
+        else:
+            user_columns = {
+                row["Field"] for row in connection.execute("SHOW COLUMNS FROM users").fetchall()
+            }
+        user_column_types = {
+            "coins": "INTEGER NOT NULL DEFAULT 0",
+            "daily_claim_date": "VARCHAR(10)",
+            "board_skin": "VARCHAR(24) NOT NULL DEFAULT 'classic'",
+            "piece_skin": "VARCHAR(24) NOT NULL DEFAULT 'classic'",
+        }
+        for name, definition in user_column_types.items():
+            if name not in user_columns:
+                connection.execute(f"ALTER TABLE users ADD COLUMN {name} {definition}")
+        if backend == "postgres":
             columns = {
                 row["column_name"] for row in connection.execute(
                     "SELECT column_name FROM information_schema.columns "
@@ -586,6 +757,7 @@ def initialize_database(backend: str, config: dict[str, Any]) -> None:
             "white_last_seen_at": "BIGINT",
             "black_last_seen_at": "BIGINT",
             "rematch_requested_by": "VARCHAR(1)",
+            "game_round": "INTEGER NOT NULL DEFAULT 1",
         }
         for name, definition in column_types.items():
             if name not in columns:
@@ -617,6 +789,16 @@ def initialize_database(backend: str, config: dict[str, Any]) -> None:
                     "CREATE INDEX room_chat_room_created "
                     "ON room_chat_messages (room_code, id)"
                 )
+        connection.execute(
+            "UPDATE users SET piece_skin = ? WHERE piece_skin = ?",
+            ("classic", "kiwen-suwi"),
+        )
+        connection.execute(
+            "DELETE FROM user_skins WHERE skin_type = ? AND skin_id = ?",
+            ("piece", "kiwen-suwi"),
+        )
+        migrate_replaced_piece_skins(connection)
+        migrate_removed_board_skin(connection)
         connection.commit()
     finally:
         connection.close()
@@ -688,6 +870,207 @@ def user_json(user: sqlite3.Row | None) -> dict[str, Any] | None:
 @bp.get("/api/session")
 def session_info():
     return jsonify(user=user_json(current_user()))
+
+
+def migrate_replaced_piece_skins(connection: DatabaseConnection) -> None:
+    for old_skin, new_skin in (("fantasy", "spatial"), ("celtic", "chessnut")):
+        connection.execute(
+            "UPDATE users SET piece_skin = ? WHERE piece_skin = ?",
+            (new_skin, old_skin),
+        )
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO user_skins(user_id, skin_type, skin_id, acquired_at)
+            SELECT user_id, skin_type, ?, acquired_at
+            FROM user_skins WHERE skin_type = 'piece' AND skin_id = ?
+            """,
+            (new_skin, old_skin),
+        )
+        connection.execute(
+            "DELETE FROM user_skins WHERE skin_type = 'piece' AND skin_id = ?",
+            (old_skin,),
+        )
+
+
+def migrate_removed_board_skin(connection: DatabaseConnection) -> None:
+    connection.execute(
+        "UPDATE users SET board_skin = 'monochrome' WHERE board_skin = 'glacier'"
+    )
+    connection.execute(
+        """
+        INSERT OR IGNORE INTO user_skins(user_id, skin_type, skin_id, acquired_at)
+        SELECT user_id, skin_type, 'monochrome', acquired_at
+        FROM user_skins WHERE skin_type = 'board' AND skin_id = 'glacier'
+        """
+    )
+    connection.execute(
+        "DELETE FROM user_skins WHERE skin_type = 'board' AND skin_id = 'glacier'"
+    )
+
+
+def shop_snapshot(user_id: int) -> dict[str, Any]:
+    user = database().execute(
+        """
+        SELECT username, coins, daily_claim_date, board_skin, piece_skin
+        FROM users WHERE id = ?
+        """,
+        (user_id,),
+    ).fetchone()
+    if user is None:
+        raise RuntimeError("The signed-in shop account could not be loaded.")
+    owned = {
+        (row["skin_type"], row["skin_id"])
+        for row in database().execute(
+            "SELECT skin_type, skin_id FROM user_skins WHERE user_id = ?",
+            (user_id,),
+        ).fetchall()
+    }
+    owned.update({("board", "classic"), ("piece", "classic")})
+    is_owner = user["username"].casefold() == OWNER_USERNAME
+    if is_owner:
+        owned.update(("piece", skin["id"]) for skin in OWNER_SPECIAL_SKINS)
+    today = datetime.now(timezone.utc).date().isoformat()
+    return {
+        "coins": user["coins"],
+        "dailyReward": DAILY_COIN_REWARD,
+        "canClaimDaily": user["daily_claim_date"] != today,
+        "boardSkin": user["board_skin"],
+        "pieceSkin": user["piece_skin"],
+        "skins": {
+            kind: [
+                {**skin, "owned": (kind, skin["id"]) in owned,
+                 "equipped": user[f"{kind}_skin"] == skin["id"]}
+                for skin in skins
+            ]
+            for kind, skins in SHOP_SKINS.items()
+        },
+        "specialSkins": [
+            {
+                **skin,
+                "owned": ("piece", skin["id"]) in owned,
+                "equipped": user["piece_skin"] == skin["id"],
+                "ownerOnly": True,
+            }
+            for skin in OWNER_SPECIAL_SKINS
+        ],
+    }
+
+
+def lock_shop_account(user_id: int):
+    connection = database()
+    connection.execute("BEGIN IMMEDIATE")
+    statement = "SELECT coins, daily_claim_date FROM users WHERE id = ?"
+    if connection.backend != "sqlite":
+        statement += " FOR UPDATE"
+    user = connection.execute(statement, (user_id,)).fetchone()
+    if user is None:
+        connection.rollback()
+        raise RuntimeError("The signed-in shop account could not be loaded.")
+    return connection, user
+
+
+@bp.get("/api/shop")
+def get_shop():
+    user = current_user()
+    if user is None:
+        return error("Sign in to use the shop and save cosmetics to your account.", 401)
+    return jsonify(shop_snapshot(user["id"]))
+
+
+@bp.post("/api/shop/daily")
+def claim_daily_coins():
+    user = current_user()
+    if user is None:
+        return error("Sign in to collect daily coins.", 401)
+    connection, account = lock_shop_account(user["id"])
+    today = datetime.now(timezone.utc).date().isoformat()
+    if account["daily_claim_date"] == today:
+        connection.rollback()
+        return error("Your daily coins have already been collected.", 409)
+    connection.execute(
+        "UPDATE users SET coins = coins + ?, daily_claim_date = ? WHERE id = ?",
+        (DAILY_COIN_REWARD, today, user["id"]),
+    )
+    connection.commit()
+    return jsonify(shop_snapshot(user["id"]))
+
+
+@bp.post("/api/shop/purchase")
+def purchase_shop_skin():
+    user = current_user()
+    if user is None:
+        return error("Sign in to purchase cosmetics.", 401)
+    body = json_body()
+    skin_type = body.get("type")
+    skin_id = body.get("skinId")
+    if not isinstance(skin_type, str) or not isinstance(skin_id, str):
+        return error("Choose a skin from the shop.")
+    if any(skin["id"] == skin_id for skin in OWNER_SPECIAL_SKINS):
+        return error("Owner-exclusive skins cannot be purchased.", 403)
+    catalog = SHOP_SKINS.get(skin_type)
+    skin = next(
+        (entry for entry in catalog or () if entry["id"] == skin_id),
+        None,
+    )
+    if skin is None or skin["price"] == 0:
+        return error("Choose a skin from the shop.")
+    connection, account = lock_shop_account(user["id"])
+    exists = connection.execute(
+        "SELECT 1 FROM user_skins WHERE user_id = ? AND skin_type = ? AND skin_id = ?",
+        (user["id"], skin_type, skin_id),
+    ).fetchone()
+    if exists is not None:
+        connection.rollback()
+        return error("You already own this skin.", 409)
+    if account["coins"] < skin["price"]:
+        connection.rollback()
+        return error("You do not have enough coins for this skin.", 409)
+    connection.execute(
+        "UPDATE users SET coins = coins - ? WHERE id = ?",
+        (skin["price"], user["id"]),
+    )
+    connection.execute(
+        "INSERT INTO user_skins(user_id, skin_type, skin_id) VALUES (?, ?, ?)",
+        (user["id"], skin_type, skin_id),
+    )
+    connection.commit()
+    return jsonify(shop_snapshot(user["id"]))
+
+
+@bp.post("/api/shop/equip")
+def equip_shop_skin():
+    user = current_user()
+    if user is None:
+        return error("Sign in to equip cosmetics.", 401)
+    body = json_body()
+    skin_type = body.get("type")
+    skin_id = body.get("skinId")
+    if not isinstance(skin_type, str) or not isinstance(skin_id, str):
+        return error("Choose a skin from the shop.")
+    owner_skin = next(
+        (skin for skin in OWNER_SPECIAL_SKINS if skin["id"] == skin_id),
+        None,
+    )
+    is_owner = user["username"].casefold() == OWNER_USERNAME
+    if owner_skin is not None and (skin_type != "piece" or not is_owner):
+        return error("This skin is reserved for the site owner.", 403)
+    catalog = SHOP_SKINS.get(skin_type)
+    if owner_skin is None and not any(
+        skin["id"] == skin_id for skin in catalog or ()
+    ):
+        return error("Choose a skin from the shop.")
+    owned = owner_skin is not None or skin_id == "classic" or database().execute(
+        "SELECT 1 FROM user_skins WHERE user_id = ? AND skin_type = ? AND skin_id = ?",
+        (user["id"], skin_type, skin_id),
+    ).fetchone() is not None
+    if not owned:
+        return error("Purchase this skin before equipping it.", 403)
+    database().execute(
+        f"UPDATE users SET {skin_type}_skin = ? WHERE id = ?",
+        (skin_id, user["id"]),
+    )
+    database().commit()
+    return jsonify(shop_snapshot(user["id"]))
 
 
 @bp.get("/api/live-matches")
@@ -1241,7 +1624,11 @@ def load_room(code: str, for_update: bool = False) -> sqlite3.Row | None:
         return None
     statement = """
         SELECT g.*, white.username AS white_name, black.username AS black_name,
-            white.rating AS white_rating, black.rating AS black_rating
+            white.rating AS white_rating, black.rating AS black_rating,
+            COALESCE(white.board_skin, 'classic') AS white_board_skin,
+            COALESCE(black.board_skin, 'classic') AS black_board_skin,
+            COALESCE(white.piece_skin, 'classic') AS white_piece_skin,
+            COALESCE(black.piece_skin, 'classic') AS black_piece_skin
         FROM games g
         LEFT JOIN users white ON white.id = g.white_user_id
         LEFT JOIN users black ON black.id = g.black_user_id
@@ -1515,9 +1902,91 @@ def rate_completed_game(
                 "change": black_change,
             },
         }
+    award_game_coins(connection, room, result)
     connection.execute(
         "UPDATE games SET rating_changes_json = ? WHERE id = ?",
         (json.dumps(changes), room["id"]),
+    )
+
+
+def award_game_coins(
+    connection: DatabaseConnection, room: sqlite3.Row, result: str
+) -> None:
+    game = connection.execute(
+        "SELECT moves_json FROM games WHERE id = ?", (room["id"],)
+    ).fetchone()
+    moves = json.loads(game["moves_json"])
+    if len(moves) < MIN_REWARDED_GAME_PLIES:
+        return
+    if result.startswith("White wins"):
+        winner_side = "w"
+    elif result.startswith("Black wins"):
+        winner_side = "b"
+    else:
+        return
+    winner_user_id = room[f"{'white' if winner_side == 'w' else 'black'}_user_id"]
+    if winner_user_id is None:
+        return
+
+    reward_day = datetime.now(timezone.utc).date().isoformat()
+    if room["bot_elo"] is not None:
+        amount = BOT_GAME_COIN_REWARDS.get(room["bot_elo"], 0)
+        if winner_side != "w" or amount == 0:
+            return
+        source = "bot"
+        opponent_user_id = None
+        daily_cap = BOT_GAME_DAILY_CAP
+    else:
+        opponent_user_id = room[f"{'black' if winner_side == 'w' else 'white'}_user_id"]
+        if opponent_user_id is None or opponent_user_id == winner_user_id:
+            return
+        winner_rating = room[f"{'white' if winner_side == 'w' else 'black'}_rating"]
+        opponent_rating = room[f"{'black' if winner_side == 'w' else 'white'}_rating"]
+        amount = max(8, min(30, 18 + (opponent_rating - winner_rating) // 100))
+        source = "player"
+        daily_cap = PLAYER_GAME_DAILY_CAP
+
+    if connection.backend != "sqlite":
+        connection.execute(
+            "SELECT id FROM users WHERE id = ? FOR UPDATE", (winner_user_id,)
+        ).fetchone()
+    earned_today = connection.execute(
+        """
+        SELECT COALESCE(SUM(amount), 0) AS total FROM coin_game_rewards
+        WHERE user_id = ? AND reward_day = ? AND source = ?
+        """,
+        (winner_user_id, reward_day, source),
+    ).fetchone()["total"]
+    if source == "player":
+        already_rewarded_opponent = connection.execute(
+            """
+            SELECT 1 FROM coin_game_rewards
+            WHERE user_id = ? AND opponent_user_id = ? AND reward_day = ?
+            LIMIT 1
+            """,
+            (winner_user_id, opponent_user_id, reward_day),
+        ).fetchone()
+        if already_rewarded_opponent is not None:
+            return
+    amount = min(amount, daily_cap - int(earned_today))
+    if amount <= 0:
+        return
+    reward_insert = connection.execute(
+        """
+        INSERT OR IGNORE INTO coin_game_rewards(
+            game_id, game_round, user_id, opponent_user_id, amount, source, reward_day
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            room["id"], room["game_round"], winner_user_id, opponent_user_id,
+            amount, source, reward_day,
+        ),
+    )
+    if reward_insert.rowcount == 0:
+        return
+    connection.execute(
+        "UPDATE users SET coins = coins + ? WHERE id = ?",
+        (amount, winner_user_id),
     )
 
 
@@ -1554,6 +2023,23 @@ def room_snapshot(
             and int(time.time() * 1000) - opponent_seen_at <= PRESENCE_TIMEOUT_MS
         )
     )
+    viewer = current_user()
+    viewer_user_id = room[f"{'white' if side == 'w' else 'black'}_user_id"]
+    reward = None
+    if (
+        room["status"] == "completed"
+        and viewer is not None
+        and viewer["id"] == viewer_user_id
+    ):
+        reward = database().execute(
+            """
+            SELECT COALESCE((
+                SELECT amount FROM coin_game_rewards
+                WHERE game_id = ? AND game_round = ? AND user_id = ?
+            ), 0) AS amount
+            """,
+            (room["id"], room["game_round"], viewer["id"]),
+        ).fetchone()
     return {
         "board": [
             [
@@ -1583,6 +2069,10 @@ def room_snapshot(
         "canCloseWaitingRoom": side == room["creator_side"],
         "opponentPresent": opponent_present,
         "whiteName": room["white_name"] or "Guest",
+        "whiteBoardSkin": room["white_board_skin"],
+        "blackBoardSkin": room["black_board_skin"],
+        "whitePieceSkin": room["white_piece_skin"],
+        "blackPieceSkin": room["black_piece_skin"],
         "blackName": (
             bot_display_name(room["bot_elo"])
             if room["bot_elo"] is not None else room["black_name"] or (
@@ -1599,6 +2089,7 @@ def room_snapshot(
             json.loads(room["rating_changes_json"])
             if room["rating_changes_json"] is not None else None
         ),
+        "coinsEarned": reward["amount"] if reward is not None else 0,
         "legalMoves": [] if over or room["status"] != "active" else [
             {
                 "from": chess.square_name(move.from_square),
@@ -2283,7 +2774,8 @@ def respond_to_new_game(code: str):
         """
         UPDATE games SET moves_json = '[]', grades_json = '[]',
             rating_changes_json = NULL, result = NULL, rematch_requested_by = NULL,
-            status = 'active', white_time_ms = ?, black_time_ms = ?,
+            game_round = game_round + 1, status = 'active',
+            white_time_ms = ?, black_time_ms = ?,
             clock_started_at = NULL
         WHERE id = ?
         """,

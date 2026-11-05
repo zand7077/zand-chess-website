@@ -17,6 +17,8 @@
       <div class="header-actions">
         <button id="global-chat-toggle" class="button quiet" type="button"
           aria-controls="global-chat-panel" aria-pressed="false">Global chat</button>
+        <button id="shop-toggle" class="button quiet" type="button"
+          aria-controls="shop-panel" aria-pressed="false">Shop</button>
         <button id="logout-button" class="button quiet hidden" type="button">Sign out</button>
       </div>
     </header>
@@ -178,6 +180,37 @@
         </p>
         <p id="global-chat-status" class="global-chat-status" role="status" aria-live="polite"></p>
       </div>
+    </section>
+    <section id="shop-panel" class="shop-panel hidden" aria-labelledby="shop-title">
+      <header class="shop-heading">
+        <div><span class="eyebrow">PERSONALIZE YOUR BOARD</span><h1 id="shop-title">Shop</h1></div>
+        <p class="muted">Original color themes for your half of the board and your pieces.</p>
+      </header>
+      <div id="shop-login" class="shop-login hidden">
+        <p>Sign in or create an account to collect coins and save your cosmetics.</p>
+        <button id="shop-sign-in" class="button primary" type="button">Sign in</button>
+      </div>
+      <div id="shop-account" class="shop-account hidden">
+        <div class="shop-wallet">
+          <div><span class="eyebrow">YOUR BALANCE</span><strong><span aria-hidden="true">◈</span> <span id="shop-coins">0</span> coins</strong></div>
+          <button id="claim-daily-coins" class="button primary" type="button">Collect daily coins</button>
+        </div>
+        <p id="shop-status" class="shop-status" role="status" aria-live="polite"></p>
+        <section class="shop-category" aria-labelledby="board-skins-title">
+          <div class="shop-category-heading"><div><span class="eyebrow">YOUR BOARD HALF</span><h2 id="board-skins-title">Board colors</h2></div><span class="muted">Only your half changes</span></div>
+          <div id="board-skin-list" class="skin-list"></div>
+        </section>
+        <section class="shop-category" aria-labelledby="piece-skins-title">
+          <div class="shop-category-heading"><div><span class="eyebrow">YOUR CHESSMEN</span><h2 id="piece-skins-title">Piece sets</h2></div><span class="muted">Shown in every game you play</span></div>
+          <div id="piece-skin-list" class="skin-list"></div>
+        </section>
+      </div>
+      <section class="shop-category owner-shop-category" aria-labelledby="owner-skins-title">
+        <div class="shop-category-heading">
+          <div><span class="eyebrow">OWNER-ONLY COLLECTION</span><h2 id="owner-skins-title">Golden Sovereign</h2></div>
+        </div>
+        <div id="owner-skin-list" class="skin-list"></div>
+      </section>
     </section>
   </main>
   <div id="profile-modal" class="profile-modal hidden" role="dialog" aria-modal="true" aria-labelledby="profile-name">
