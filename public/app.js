@@ -316,6 +316,22 @@ function squareCoords(name) {
   return { row: 8 - Number(name[1]), col: name.charCodeAt(0) - 97 };
 }
 
+function castleDestinationForRook(from, rookSquare) {
+  if (!state.game || from === rookSquare) return null;
+  const { row, col } = squareCoords(from);
+  const rookCoords = squareCoords(rookSquare);
+  const king = state.game.board[row][col];
+  if (king?.[1] !== "k" || rookCoords.row !== row ||
+      ![0, 7].includes(rookCoords.col) ||
+      state.game.board[rookCoords.row][rookCoords.col] !== `${king[0]}r`) return null;
+  const destinationCol = col + (rookCoords.col > col ? 2 : -2);
+  if (destinationCol < 0 || destinationCol > 7) return null;
+  const destination = squareName(row, destinationCol);
+  return state.game.legalMoves.some((move) => move.from === from && move.to === destination)
+    ? destination
+    : null;
+}
+
 function hasDarkSurface(square) {
   const color = window.getComputedStyle(square).backgroundColor.match(
     /rgba?\((\d+),\s*(\d+),\s*(\d+)/,
@@ -608,7 +624,10 @@ function movePiecePointer(event) {
   event.preventDefault();
   movePieceGhost(drag, event.clientX, event.clientY);
   const hovered = document.elementFromPoint(event.clientX, event.clientY)?.closest(".square");
-  const nextTarget = hovered?.dataset.square || null;
+  const hoveredSquare = hovered?.dataset.square || null;
+  const nextTarget = hoveredSquare
+    ? castleDestinationForRook(drag.from, hoveredSquare) || hoveredSquare
+    : null;
   if (drag.target !== nextTarget) {
     drag.target = nextTarget;
     renderBoard();
@@ -630,7 +649,8 @@ function endPiecePointer(event) {
   const hovered = moved
     ? document.elementFromPoint(event.clientX, event.clientY)?.closest(".square")
     : null;
-  const destination = hovered?.dataset.square || drag.from;
+  const hoveredSquare = hovered?.dataset.square || drag.from;
+  const destination = castleDestinationForRook(drag.from, hoveredSquare) || hoveredSquare;
   clearPiecePointer(drag);
   if (!moved) return;
   state.suppressClick = true;
@@ -735,10 +755,13 @@ function setBoardOrientation() {
   ) || state.reviewCandidates[0];
   const selectedThreat = selectedCandidate?.attackedTarget?.square;
   const lastMove = isReviewing ? null : state.game.lastMove;
-  const legalDestinations = !isReviewing && state.selected
+  const legalMoveSource = !isReviewing
+    ? state.drag?.started ? state.drag.from : state.selected
+    : null;
+  const legalDestinations = legalMoveSource
     ? new Set(
       state.game.legalMoves
-        .filter((move) => move.from === state.selected)
+        .filter((move) => move.from === legalMoveSource)
         .map((move) => move.to),
     )
     : new Set();
@@ -823,7 +846,7 @@ function setBoardOrientation() {
       if (state.drag?.from === name) square.classList.add("drag-origin");
       if (state.drag?.target === name && state.drag.from !== name) square.classList.add("drag-target");
       if (currentKing === name) square.classList.add("check");
-      if (state.game.legalMoves.some((move) => move.from === state.selected && move.to === name)) {
+      if (state.game.legalMoves.some((move) => move.from === legalMoveSource && move.to === name)) {
         square.classList.add("capture-target");
       }
 
@@ -1635,6 +1658,11 @@ async function onSquareClick(name) {
       state.selected = name;
       renderBoard();
     }
+    return;
+  }
+  const castleDestination = castleDestinationForRook(state.selected, name);
+  if (castleDestination) {
+    await sendMove(state.selected, castleDestination);
     return;
   }
   if (piece?.[0] === state.game.turn) {
