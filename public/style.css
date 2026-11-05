@@ -185,11 +185,18 @@ h1,h2,p { margin: 0; }
 .square.light.board-skin-white-rosewood,.square.light.board-skin-black-rosewood { --board-light: #f1ddd5; }
 .square.dark.board-skin-white-rosewood,.square.dark.board-skin-black-rosewood { --board-dark: #9a5c55; }
 .square.light.board-skin-white-monochrome,.square.light.board-skin-black-monochrome { --board-light: #f2f2f0; }
-.square.dark.board-skin-white-monochrome,.square.dark.board-skin-black-monochrome { --board-dark: #282a30; }
+.square.dark.board-skin-white-monochrome,.square.dark.board-skin-black-monochrome { --board-dark: #474a51; }
 .square.light.board-skin-white-nebula,.square.light.board-skin-black-nebula { --board-light: #e5ddef; }
-.square.dark.board-skin-white-nebula,.square.dark.board-skin-black-nebula { --board-dark: #34284d; }
+.square.dark.board-skin-white-nebula,.square.dark.board-skin-black-nebula { --board-dark: #493b61; }
 .square.nebula-detail.light.board-skin-white-nebula,.square.nebula-detail.light.board-skin-black-nebula { background-image: radial-gradient(circle at 15% 19%,#9a793d 0 1px,transparent 1.8px),radial-gradient(circle at 79% 26%,#75648f 0 1px,transparent 1.8px),radial-gradient(circle at 72% 82%,#9a793d 0 1px,transparent 1.8px),radial-gradient(circle at 24% 72%,#75648f 0 1px,transparent 1.8px),radial-gradient(ellipse at center,transparent 39%,#ac8f5e42 45%,transparent 49%); }
 .square.nebula-detail.dark.board-skin-white-nebula,.square.nebula-detail.dark.board-skin-black-nebula { background-image: radial-gradient(circle at 15% 19%,#f3d996 0 1px,transparent 1.8px),radial-gradient(circle at 79% 26%,#ded2ff 0 1px,transparent 1.8px),radial-gradient(circle at 72% 82%,#f3d996 0 1px,transparent 1.8px),radial-gradient(circle at 24% 72%,#ded2ff 0 1px,transparent 1.8px),radial-gradient(ellipse at center,transparent 39%,#d4b76850 45%,transparent 49%); }
+.square.dark.board-skin-white-monochrome .piece.black,
+.square.dark.board-skin-black-monochrome .piece.black,
+.square.dark.board-skin-white-nebula .piece.black,
+.square.dark.board-skin-black-nebula .piece.black {
+  -webkit-text-stroke: 1px #e8dfcc;
+  filter: drop-shadow(0 0 1px #f2e7d4) drop-shadow(0 0 1px #f2e7d4);
+}
 .piece.skin-white-ivory,.drag-piece.skin-white-ivory { color: #fff2c6; -webkit-text-stroke: .65px #806438; }
 .piece.skin-black-ivory,.drag-piece.skin-black-ivory { color: #755125; }
 .piece.skin-white-onyx,.drag-piece.skin-white-onyx { color: #f5f5f2; -webkit-text-stroke: .65px #53606b; }
