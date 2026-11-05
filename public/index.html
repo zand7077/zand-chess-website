@@ -78,6 +78,29 @@
           <div id="move-list" class="move-list"><div class="empty-history"><p>No moves yet.</p></div></div>
         </section>
 
+        <section id="game-review-panel" class="game-review panel hidden">
+          <div class="section-heading"><div><span class="eyebrow">STOCKFISH REVIEW</span><h2 id="review-move-title">Game review</h2></div></div>
+          <p class="review-intro">Amber marks the played move, the green arrow shows an alternative, and red rings mark enemy pieces it attacks.</p>
+          <button id="start-game-review" class="action-button secondary review-start" type="button">REVIEW GAME</button>
+          <div id="review-controls" class="review-controls hidden">
+            <div class="review-navigation">
+              <button id="review-previous" class="action-button secondary" type="button" aria-label="Previous move">←</button>
+              <span id="review-position" class="move-total">0 / 0 MOVES</span>
+              <button id="review-next" class="action-button secondary" type="button" aria-label="Next move">→</button>
+            </div>
+            <div class="review-actions">
+              <button id="review-play" class="action-button primary" type="button">Play</button>
+              <button id="review-exit" class="action-button secondary" type="button">Exit review</button>
+            </div>
+            <p id="review-explanation" class="review-explanation" aria-live="polite"></p>
+            <section class="review-alternatives-panel" aria-labelledby="review-alternatives-title">
+              <h3 id="review-alternatives-title">Strong alternatives</h3>
+              <p id="review-alternatives-status" class="review-alternatives-status"></p>
+              <div id="review-alternatives" class="review-alternatives"></div>
+            </section>
+          </div>
+        </section>
+
         <section id="chat-panel" class="chat-panel panel">
           <div class="section-heading chat-heading">
             <div><span class="eyebrow">MESSAGES</span><h2>Game chat</h2></div>
@@ -136,6 +159,7 @@
       <h2 id="result-title">Game over</h2>
       <p class="modal-subtitle">Account ratings update automatically based on both players’ ratings and the match result.</p>
       <div id="elo-result" class="elo-result"></div>
+      <button id="open-game-review" class="action-button primary review-modal-button hidden" type="button">REVIEW GAME</button>
     </div>
   </div>
   <div id="rematch-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="rematch-title">

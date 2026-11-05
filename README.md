@@ -71,6 +71,11 @@ and authors are in `public/engine/Copying.txt` and `public/engine/AUTHORS.txt`.
 The corresponding source is available at
 [Stockfish.js v19.0.1](https://github.com/nmrugg/stockfish.js/tree/v19.0.1).
 
+After a game, either player can open its review, step through or play back the
+moves, and read Stockfish's grade, evaluation loss, and preferred move for each
+analyzed turn. The review also highlights other top Stockfish continuations on
+the board and explains their evaluation and tactical or positional benefits.
+
 You can also play against browser-based Stockfish opponents at approximately
 200 or 1000 Elo, or against Karti at approximately 1600 Elo. These strengths
 are approximations, and bot games do not change account ratings. During a

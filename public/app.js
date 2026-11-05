@@ -35,6 +35,14 @@ const state = {
   botThinking: false,
   startedAt: Date.now(),
   modalShown: false,
+  reviewPly: null,
+  reviewTimer: null,
+  reviewPlaying: false,
+  reviewAnalysisPly: null,
+  reviewCandidates: [],
+  reviewSelectedCandidate: null,
+  reviewTopMoveSan: null,
+  reviewAnalysisStatus: "",
   toastTimer: null,
   gradePopupTimer: null,
   animatedPly: 0,
@@ -83,6 +91,19 @@ function initializeStockfish() {
       const pending = state.enginePending;
       if (!pending) return;
       const score = line.match(/\bscore (cp|mate) (-?\d+)/);
+      if (pending.kind === "candidates" && score) {
+        const variation = line.match(/\bmultipv (\d+)\b.*?\bpv ((?:[a-h][1-8][a-h][1-8][qrbn]?\s*)+)/);
+        if (variation) {
+          pending.candidates.set(Number(variation[1]), {
+            uci: variation[2].trim().split(/\s+/)[0],
+            rank: Number(variation[1]),
+            value: score[1] === "mate"
+              ? (Number(score[2]) > 0 ? 10000 : -10000)
+              : Number(score[2]),
+            mate: score[1] === "mate" ? Number(score[2]) : null,
+          });
+        }
+      }
       if (score) {
         const mate = score[1] === "mate" ? Number(score[2]) : null;
         pending.score = {
@@ -97,6 +118,11 @@ function initializeStockfish() {
           const bestMove = line.match(/^bestmove\s+([a-h][1-8][a-h][1-8][qrbn]?)/);
           if (bestMove) pending.resolve(bestMove[1]);
           else pending.reject(new Error("Stockfish did not return a legal move."));
+        } else if (pending.kind === "candidates") {
+          const candidates = [...pending.candidates.values()]
+            .sort((left, right) => left.rank - right.rank);
+          if (candidates.length) pending.resolve(candidates);
+          else pending.reject(new Error("Stockfish did not return review variations."));
         } else if (pending.score === null) {
           pending.reject(new Error("Stockfish did not return an evaluation."));
         } else {
@@ -127,6 +153,7 @@ function stockfishScore(fen) {
       };
       state.enginePending = pending;
       stockfish.postMessage("setoption name UCI_LimitStrength value false");
+      stockfish.postMessage("setoption name MultiPV value 1");
       stockfish.postMessage("setoption name Skill Level value 20");
       stockfish.postMessage(`position fen ${fen}`);
       stockfish.postMessage("go movetime 80");
@@ -136,7 +163,7 @@ function stockfishScore(fen) {
   return request;
 }
 
-function stockfishBestMove(fen, elo) {
+function stockfishBestMove(fen, elo, skillLevel = BOT_SKILL_LEVELS[elo]) {
   const request = engineQueue.then(async () => {
     await initializeStockfish();
     return new Promise((resolve, reject) => {
@@ -151,9 +178,36 @@ function stockfishBestMove(fen, elo) {
       };
       state.enginePending = pending;
       stockfish.postMessage("setoption name UCI_LimitStrength value false");
-      stockfish.postMessage(`setoption name Skill Level value ${BOT_SKILL_LEVELS[elo]}`);
+      stockfish.postMessage("setoption name MultiPV value 1");
+      stockfish.postMessage(`setoption name Skill Level value ${skillLevel}`);
       stockfish.postMessage(`position fen ${fen}`);
       stockfish.postMessage("go movetime 350");
+    });
+  });
+  engineQueue = request.catch(() => {});
+  return request;
+}
+
+function stockfishCandidates(fen, count = 4) {
+  const request = engineQueue.then(async () => {
+    await initializeStockfish();
+    return new Promise((resolve, reject) => {
+      const pending = {
+        kind: "candidates",
+        candidates: new Map(),
+        resolve,
+        reject,
+        timeout: window.setTimeout(() => {
+          state.enginePending = null;
+          reject(new Error("Stockfish review analysis timed out."));
+        }, 15000),
+      };
+      state.enginePending = pending;
+      stockfish.postMessage("setoption name UCI_LimitStrength value false");
+      stockfish.postMessage(`setoption name MultiPV value ${count}`);
+      stockfish.postMessage("setoption name Skill Level value 20");
+      stockfish.postMessage(`position fen ${fen}`);
+      stockfish.postMessage("go movetime 650");
     });
   });
   engineQueue = request.catch(() => {});
@@ -165,6 +219,12 @@ const BOT_SKILL_LEVELS = { 200: 0, 1000: 2, 1600: 5 };
 async function analyzeLastMove(beforeFen, next, ply) {
   const bestBefore = await stockfishScore(beforeFen);
   const afterScore = await stockfishScore(next.fen);
+  let bestMove = null;
+  try {
+    bestMove = await stockfishBestMove(beforeFen, 1600, 20);
+  } catch (error) {
+    showToast(`Stockfish could not find a recommended move: ${error.message}`);
+  }
   const missedWin = bestBefore.mate !== null && bestBefore.mate > 0 &&
     !(afterScore.mate !== null && afterScore.mate < 0);
   const centipawnLoss = missedWin
@@ -181,6 +241,7 @@ async function analyzeLastMove(beforeFen, next, ply) {
       centipawnLoss,
       evaluation: whiteEvaluation,
       missedWin,
+      bestMove,
     }),
   });
   await updateGame(analyzed);
@@ -307,7 +368,7 @@ function movePieceGhost(drag, x, y) {
 
 function beginPiecePointer(event) {
   if (event.button !== 0 || !state.game || state.busy || state.isSpectator ||
-      state.game.over || state.game.status !== "active") return;
+      state.reviewPly !== null || state.game.over || state.game.status !== "active") return;
   const square = event.target.closest(".square");
   if (!square) return;
   const from = square.dataset.square;
@@ -408,6 +469,31 @@ function makeBoard() {
       boardElement.append(button);
     }
   }
+  const overlay = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  overlay.id = "review-arrow-overlay";
+  overlay.setAttribute("viewBox", "0 0 1000 1000");
+  overlay.setAttribute("aria-hidden", "true");
+  const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
+  const marker = document.createElementNS("http://www.w3.org/2000/svg", "marker");
+  marker.id = "review-arrow-head";
+  marker.setAttribute("viewBox", "0 0 12 12");
+  marker.setAttribute("refX", "10");
+  marker.setAttribute("refY", "6");
+  marker.setAttribute("markerWidth", "7");
+  marker.setAttribute("markerHeight", "7");
+  marker.setAttribute("markerUnits", "userSpaceOnUse");
+  marker.setAttribute("orient", "auto");
+  const arrowHead = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  arrowHead.setAttribute("d", "M 1 1 L 11 6 L 1 11 Z");
+  arrowHead.classList.add("review-arrow-head");
+  marker.append(arrowHead);
+  defs.append(marker);
+  const arrow = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  arrow.id = "review-move-arrow";
+  arrow.setAttribute("marker-end", "url(#review-arrow-head)");
+  arrow.classList.add("review-move-arrow");
+  overlay.append(defs, arrow);
+  boardElement.append(overlay);
   boardElement.addEventListener("pointerdown", beginPiecePointer);
   boardElement.addEventListener("pointermove", movePiecePointer, { passive: false });
   boardElement.addEventListener("pointerup", endPiecePointer);
@@ -415,17 +501,31 @@ function makeBoard() {
 }
 
 function setBoardOrientation() {
-  const legalDestinations = state.selected
+  const isReviewing = state.reviewPly !== null;
+  const positionBoard = isReviewing
+    ? reviewPositionBoard(Math.max(0, state.reviewPly - 1))
+    : state.game.board;
+  const reviewMove = isReviewing && state.reviewPly > 0
+    ? state.game.history[state.reviewPly - 1]
+    : null;
+  const positionTurn = reviewPlyTurn(Math.max(0, state.reviewPly - 1));
+  const positionCheck = isReviewing ? false : state.game.check;
+  const selectedCandidate = state.reviewCandidates.find(
+    (candidate) => candidate.uci === state.reviewSelectedCandidate,
+  ) || state.reviewCandidates[0];
+  const selectedThreat = selectedCandidate?.attackedTarget?.square;
+  const lastMove = isReviewing ? null : state.game.lastMove;
+  const legalDestinations = !isReviewing && state.selected
     ? new Set(
       state.game.legalMoves
         .filter((move) => move.from === state.selected)
         .map((move) => move.to),
     )
     : new Set();
-  const currentKing = state.game.check
-    ? state.game.board.flatMap((row, r) => row.map((piece, c) => ({
+  const currentKing = positionCheck
+    ? positionBoard.flatMap((row, r) => row.map((piece, c) => ({
       piece, square: squareName(r, c),
-    }))).find(({ piece }) => piece === `${state.game.turn}k`)?.square
+    }))).find(({ piece }) => piece === `${positionTurn}k`)?.square
     : null;
   squares.clear();
 
@@ -434,7 +534,7 @@ function setBoardOrientation() {
       const row = state.flipped ? 7 - displayRow : displayRow;
       const col = state.flipped ? 7 - displayCol : displayCol;
       const name = squareName(row, col);
-      const pieceCode = state.game.board[row][col];
+      const pieceCode = positionBoard[row][col];
       const square = gridSquares.get(`${displayRow},${displayCol}`);
       const parts = squareParts.get(square);
       square.style.gridRow = String(displayRow + 1);
@@ -443,8 +543,23 @@ function setBoardOrientation() {
       square.dataset.square = name;
       squares.set(name, square);
       square.setAttribute("aria-label", `${pieceCode ? `${pieceCode[0] === "w" ? "White" : "Black"} ${pieceCode[1]}` : "Empty"} ${name}`);
-      if (state.game.lastMove && [state.game.lastMove.from, state.game.lastMove.to].includes(name)) {
+      if (lastMove && [lastMove.from, lastMove.to].includes(name)) {
         square.classList.add("last-move");
+      }
+      if (isReviewing && reviewMove &&
+          [reviewMove.from, reviewMove.to].includes(name)) {
+        square.classList.add("review-played-square");
+      }
+      if (isReviewing && selectedCandidate &&
+          selectedCandidate.from === name) {
+        square.classList.add("review-candidate-from");
+      }
+      if (isReviewing && selectedCandidate &&
+          selectedCandidate.to === name) {
+        square.classList.add("review-candidate-to");
+      }
+      if (isReviewing && selectedThreat === name) {
+        square.classList.add("review-threat-target");
       }
       if (state.selected === name) square.classList.add("selected");
       if (state.drag?.from === name && !state.drag.started) {
@@ -484,9 +599,64 @@ function setBoardOrientation() {
       parts.piece.className = pieceCode
         ? `piece ${pieceCode[0] === "w" ? "white" : "black"}`
         : "piece";
+      if (isReviewing && selectedCandidate?.from === name) {
+        parts.piece.classList.add("review-candidate-piece");
+      }
       parts.piece.draggable = false;
     }
   }
+  renderReviewArrow(selectedCandidate);
+}
+
+function renderReviewArrow(candidate) {
+  const arrow = document.querySelector("#review-move-arrow");
+  if (!arrow) return;
+  if (!candidate || state.reviewPly === null) {
+    arrow.setAttribute("d", "");
+    return;
+  }
+  const from = squareCoords(candidate.from);
+  const to = squareCoords(candidate.to);
+  const fromRow = state.flipped ? 7 - from.row : from.row;
+  const fromCol = state.flipped ? 7 - from.col : from.col;
+  const toRow = state.flipped ? 7 - to.row : to.row;
+  const toCol = state.flipped ? 7 - to.col : to.col;
+  let x1 = (fromCol + 0.5) * 125;
+  let y1 = (fromRow + 0.5) * 125;
+  let x2 = (toCol + 0.5) * 125;
+  let y2 = (toRow + 0.5) * 125;
+  const length = Math.hypot(x2 - x1, y2 - y1);
+  const inset = Math.min(37, length * 0.2);
+  const unitX = (x2 - x1) / length;
+  const unitY = (y2 - y1) / length;
+  x1 += unitX * inset;
+  y1 += unitY * inset;
+  x2 -= unitX * inset;
+  y2 -= unitY * inset;
+  arrow.setAttribute("d", `M ${x1} ${y1} L ${x2} ${y2}`);
+}
+
+function reviewPositionBoard(ply) {
+  const placement = ply === 0
+    ? "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR"
+    : state.game.history[ply - 1]?.fen?.split(" ")[0];
+  if (!placement) return state.game.board;
+  return placement.split("/").map((rank) => {
+    const row = [];
+    for (const token of rank) {
+      if (/\d/.test(token)) {
+        row.push(...Array(Number(token)).fill(null));
+      } else {
+        row.push(`${token === token.toUpperCase() ? "w" : "b"}${token.toLowerCase()}`);
+      }
+    }
+    return row;
+  });
+}
+
+function reviewPlyTurn(ply) {
+  if (ply === null) return state.game.turn;
+  return ply === 0 ? "w" : state.game.history[ply - 1]?.fen?.split(" ")[1] || "w";
 }
 
 function renderBoard() {
@@ -502,9 +672,17 @@ function gradeIcon(grade, className) {
 }
 
 function historyMove(move, index) {
-  const wrapper = document.createElement("div");
+  const wrapper = document.createElement("button");
+  wrapper.type = "button";
   wrapper.className = "history-move";
+  wrapper.dataset.ply = String(index + 1);
   if (index === state.game.history.length - 1) wrapper.classList.add("latest");
+  if (state.reviewPly === index + 1) wrapper.classList.add("review-selected");
+  wrapper.disabled = !state.game.over || state.isSpectator;
+  wrapper.setAttribute("aria-label", `Review move ${Math.floor(index / 2) + 1}${index % 2 ? "... " : ". "}${move.san}`);
+  wrapper.addEventListener("click", () => {
+    if (state.game.over && !state.isSpectator) openGameReview(index + 1);
+  });
   const san = document.createElement("span");
   san.textContent = move.san;
   wrapper.append(san);
@@ -591,6 +769,207 @@ function renderHistory() {
       : `${last.centipawnLoss} centipawn loss · Stockfish 19 Lite`)
     : "Move details appear here.";
   document.querySelector("#last-explanation").textContent = explanation;
+  renderGameReview();
+}
+
+function reviewExplanation(ply) {
+  if (ply === 0) return "Starting position. Step through the moves to see Stockfish’s assessment and best line.";
+  const move = state.game.history[ply - 1];
+  if (!move?.grade) {
+    return "Stockfish is still analyzing this move. The replay is available while its analysis catches up.";
+  }
+  const loss = Number.isFinite(move.centipawnLoss)
+    ? move.centipawnLoss
+    : null;
+  let explanation;
+  if (loss === null) {
+    explanation = `Stockfish rates ${move.san} as ${move.grade.toLowerCase()}.`;
+  } else if (loss <= 10) {
+    explanation = `Stockfish rates ${move.san} as ${move.grade.toLowerCase()}: it keeps the position within 0.1 pawns of its preferred evaluation.`;
+  } else {
+    explanation = `Stockfish rates ${move.san} as ${move.grade.toLowerCase()}: it gives up about ${(loss / 100).toFixed(1)} pawns of evaluation compared with the best line.`;
+  }
+  const bestMoveSan = state.reviewTopMoveSan || move.bestMoveSan;
+  if (bestMoveSan) {
+    explanation += bestMoveSan === move.san
+      ? " This was also Stockfish’s top move."
+      : ` Stockfish preferred ${bestMoveSan}.`;
+  }
+  return explanation;
+}
+
+function renderGameReview() {
+  const available = state.game.over && !state.isSpectator &&
+    state.game.history.length > 0;
+  const panel = document.querySelector("#game-review-panel");
+  panel.classList.toggle("hidden", !available);
+  document.querySelector("#open-game-review").classList.toggle("hidden", !available);
+  document.querySelector(".app-shell").classList.toggle(
+    "review-mode",
+    available && state.reviewPly !== null,
+  );
+  if (!available) return;
+  const reviewing = state.reviewPly !== null;
+  document.querySelector("#start-game-review").classList.toggle("hidden", reviewing);
+  document.querySelector("#review-controls").classList.toggle("hidden", !reviewing);
+  if (!reviewing) return;
+  const total = state.game.history.length;
+  const move = state.game.history[state.reviewPly - 1];
+  document.querySelector("#review-move-title").textContent =
+    `${Math.floor((state.reviewPly + 1) / 2)}${state.reviewPly % 2 ? "." : "..."} ${move.san} · ${move.color === "w" ? "WHITE" : "BLACK"}`;
+  document.querySelector("#review-position").textContent =
+    `MOVE ${state.reviewPly} OF ${total}`;
+  document.querySelector("#review-explanation").textContent =
+    reviewExplanation(state.reviewPly);
+  document.querySelector("#review-previous").disabled = state.reviewPly <= 1;
+  document.querySelector("#review-next").disabled = state.reviewPly === total;
+  document.querySelector("#review-play").disabled = total === 0;
+  document.querySelector("#review-play").textContent =
+    state.reviewPlaying ? "Pause" : "Play";
+  renderReviewAlternatives();
+}
+
+function openGameReview(ply = 0) {
+  if (!state.game?.over || state.isSpectator) return;
+  stopReviewPlayback();
+  state.reviewPly = Math.max(
+    state.game.history.length ? 1 : 0,
+    Math.min(state.game.history.length, ply),
+  );
+  state.selected = null;
+  render();
+  if (state.reviewPly > 0) void loadReviewAlternatives(state.reviewPly);
+}
+
+function stopReviewPlayback() {
+  if (state.reviewTimer !== null) window.clearInterval(state.reviewTimer);
+  state.reviewTimer = null;
+  state.reviewPlaying = false;
+}
+
+function startReviewPlayback() {
+  if (!state.game?.history.length) return;
+  if (state.reviewPly >= state.game.history.length) state.reviewPly = 1;
+  state.reviewPlaying = true;
+  state.reviewTimer = window.setInterval(() => {
+    if (state.reviewPly >= state.game.history.length) {
+      stopReviewPlayback();
+      render();
+      return;
+    }
+    state.reviewPly += 1;
+    render();
+    void loadReviewAlternatives(state.reviewPly);
+  }, 1100);
+  render();
+  void loadReviewAlternatives(state.reviewPly);
+}
+
+function reviewPositionFen(ply) {
+  return ply <= 1
+    ? "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+    : state.game.history[ply - 2].fen;
+}
+
+function candidateExplanation(candidate, index, evaluation) {
+  const sideToMove = reviewPositionFen(state.reviewAnalysisPly).split(" ")[1];
+  const whiteEvaluation = sideToMove === "w" ? evaluation : -evaluation;
+  const evaluationText = whiteEvaluation === 10000 || whiteEvaluation === -10000
+    ? `Stockfish sees a forced mate for ${whiteEvaluation > 0 ? "White" : "Black"}.`
+    : `Stockfish evaluates the position at ${whiteEvaluation >= 0 ? "+" : ""}${(whiteEvaluation / 100).toFixed(1)} for White.`;
+  const feature = candidate.captured
+    ? `It captures the ${candidate.captured} on ${candidate.to}.`
+    : candidate.piece === "knight" || candidate.piece === "bishop"
+      ? `It develops the ${candidate.piece} to ${candidate.to}, helping control the center.`
+      : candidate.piece === "pawn" && ["d4", "e4", "d5", "e5"].includes(candidate.to)
+        ? `It advances a central pawn to ${candidate.to}, contesting the center.`
+        : `It places the ${candidate.piece} on ${candidate.to}, improving its activity.`;
+  const attack = candidate.attackedTarget
+    ? ` From there, it attacks the ${candidate.attackedTarget.color} ${candidate.attackedTarget.piece} on ${candidate.attackedTarget.square}.`
+    : "";
+  return `Stockfish ranks this as its #${candidate.rank} line. ${feature}${attack} ${evaluationText}`;
+}
+
+function renderReviewAlternatives() {
+  const list = document.querySelector("#review-alternatives");
+  list.replaceChildren();
+  const status = document.querySelector("#review-alternatives-status");
+  if (state.reviewAnalysisStatus) {
+    status.textContent = state.reviewAnalysisStatus;
+    return;
+  }
+  status.textContent = state.reviewCandidates.length
+    ? "Choose an alternative to see its line on the board."
+    : "No additional Stockfish alternatives were returned for this position.";
+  for (const [index, candidate] of state.reviewCandidates.entries()) {
+    const option = document.createElement("button");
+    option.type = "button";
+    option.className = "review-alternative";
+    option.classList.toggle(
+      "selected",
+      candidate.uci === (state.reviewSelectedCandidate || state.reviewCandidates[0].uci),
+    );
+    const heading = document.createElement("strong");
+    heading.textContent = `${candidate.san} · ${candidate.piece}`;
+    const detail = document.createElement("span");
+    detail.textContent = candidateExplanation(candidate, index, candidate.value);
+    option.append(heading, detail);
+    option.addEventListener("click", () => {
+      state.reviewSelectedCandidate = candidate.uci;
+      render();
+    });
+    list.append(option);
+  }
+}
+
+async function loadReviewAlternatives(ply) {
+  if (!state.game?.over || ply < 1 || ply > state.game.history.length) return;
+  state.reviewAnalysisPly = ply;
+  state.reviewCandidates = [];
+  state.reviewSelectedCandidate = null;
+  state.reviewTopMoveSan = null;
+  state.reviewAnalysisStatus = "Stockfish is analyzing alternative moves…";
+  render();
+  try {
+    const lines = await stockfishCandidates(reviewPositionFen(ply));
+    if (state.reviewPly !== ply) return;
+    const actualMove = state.game.history[ply - 1];
+    const uci = `${actualMove.from}${actualMove.to}${actualMove.promotion || ""}`;
+    if (!lines.length) {
+      state.reviewAnalysisStatus = "";
+      render();
+      return;
+    }
+    const result = await api(
+      roomApiPath(`/review/${ply}/alternatives`),
+      {
+        method: "POST",
+        body: JSON.stringify({ moves: lines.map((line) => line.uci) }),
+      },
+    );
+    if (state.reviewPly !== ply) return;
+    const reviewedLines = result.alternatives.map((alternative) => {
+      const line = lines.find((candidate) => candidate.uci === alternative.uci);
+      return {
+        ...alternative,
+        value: line.value,
+        mate: line.mate,
+        rank: line.rank,
+      };
+    });
+    state.reviewTopMoveSan =
+      reviewedLines.find((line) => line.rank === 1)?.san || null;
+    state.reviewCandidates = reviewedLines
+      .filter((line) => line.uci !== uci)
+      .slice(0, 3);
+    state.reviewAnalysisStatus = "";
+    state.reviewSelectedCandidate = state.reviewCandidates[0]?.uci || null;
+    render();
+  } catch (error) {
+    if (state.reviewPly !== ply) return;
+    state.reviewAnalysisStatus = `Stockfish alternatives could not be loaded: ${error.message}`;
+    render();
+  }
 }
 
 function renderCaptured() {
@@ -772,6 +1151,10 @@ async function setRoomTyping(isTyping) {
 
 function render() {
   if (!state.game) return;
+  document.querySelector(".app-shell").classList.toggle(
+    "review-mode",
+    state.reviewPly !== null && state.game.over && !state.isSpectator,
+  );
   document.querySelector("#spectator-banner").classList.toggle("hidden", !state.isSpectator);
   document.querySelector("#chat-panel").classList.toggle("hidden", state.isSpectator);
   const quickChatButton = document.querySelector("#open-quick-chat");
@@ -892,6 +1275,10 @@ async function updateGame(next, animate = false) {
     state.orientationInitialized = true;
   }
   if (previousGameOver && !next.over) state.modalShown = false;
+  if (previousGameOver && !next.over) {
+    stopReviewPlayback();
+    state.reviewPly = null;
+  }
   render();
   if (highlightedGrade) showGradePopup(highlightedGrade);
   if (animate && next.lastMove?.captured && next.lastMove !== oldLastMove) animateCapture();
@@ -950,7 +1337,7 @@ function queuePremove(from, to) {
 }
 
 async function onSquareClick(name) {
-  if (state.isSpectator || !name || !state.game || state.game.over || state.busy) return;
+  if (state.isSpectator || state.reviewPly !== null || !name || !state.game || state.game.over || state.busy) return;
   if (state.game.status !== "active") return;
   const isOurTurn = state.game.playerSide === state.game.turn;
   if (!isOurTurn) {
@@ -1169,6 +1556,32 @@ function renderClocks() {
 }
 
 document.querySelector("#new-game").addEventListener("click", newGame);
+document.querySelector("#open-game-review").addEventListener("click", () => {
+  document.querySelector("#elo-modal").classList.add("hidden");
+  openGameReview();
+});
+document.querySelector("#start-game-review").addEventListener("click", () => openGameReview());
+document.querySelector("#review-previous").addEventListener("click", () => {
+  if (state.reviewPly > 1) openGameReview(state.reviewPly - 1);
+});
+document.querySelector("#review-next").addEventListener("click", () => {
+  if (state.reviewPly < state.game.history.length) openGameReview(state.reviewPly + 1);
+});
+document.querySelector("#review-play").addEventListener("click", () => {
+  if (state.reviewPlaying) {
+    stopReviewPlayback();
+    render();
+  } else {
+    startReviewPlayback();
+  }
+});
+document.querySelector("#review-exit").addEventListener("click", () => {
+  stopReviewPlayback();
+  state.reviewPly = null;
+  state.reviewCandidates = [];
+  state.reviewSelectedCandidate = null;
+  render();
+});
 document.querySelector("#accept-rematch").addEventListener("click", () => {
   void respondToRematch(true);
 });
@@ -1319,7 +1732,9 @@ async function pollGameState() {
           next.clockStartedAt !== state.game.clockStartedAt ||
           next.rematchRequestedBy !== state.game.rematchRequestedBy ||
           JSON.stringify(next.ratingChanges) !== JSON.stringify(state.game.ratingChanges) ||
-          next.history.at(-1)?.grade !== state.game.history.at(-1)?.grade) {
+          next.history.some((move, index) =>
+            move.grade !== state.game.history[index]?.grade ||
+            move.bestMoveSan !== state.game.history[index]?.bestMoveSan)) {
         updateGame(next, next.history.length > state.game.history.length);
       } else {
         state.game.whiteTimeMs = next.whiteTimeMs;

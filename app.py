@@ -1404,6 +1404,9 @@ def _history_entry(
         "promotion": chess.piece_symbol(move.promotion) if move.promotion else None,
         "grade": grade.get("grade"),
         "centipawnLoss": grade.get("centipawnLoss"),
+        "bestMoveSan": grade.get("bestMoveSan"),
+        "fen": board.fen(),
+        "check": board.is_check(),
         "capturedAt": captured_at if captured_piece else None,
     }
 
@@ -2015,6 +2018,7 @@ def submit_move_analysis(code: str):
     centipawn_loss = body.get("centipawnLoss")
     evaluation = body.get("evaluation")
     missed_win = body.get("missedWin", False)
+    best_move_uci = body.get("bestMove")
     if (
         not isinstance(ply, int)
         or isinstance(ply, bool)
@@ -2026,6 +2030,13 @@ def submit_move_analysis(code: str):
         or not 1 <= ply <= 1000
         or not 0 <= centipawn_loss <= 3000
         or not -10000 <= evaluation <= 10000
+        or (
+            best_move_uci is not None
+            and (
+                not isinstance(best_move_uci, str)
+                or not re.fullmatch(r"[a-h][1-8][a-h][1-8][qrbn]?", best_move_uci)
+            )
+        )
     ):
         return error("The engine analysis values are invalid.")
     connection = database()
@@ -2049,6 +2060,13 @@ def submit_move_analysis(code: str):
     for uci in moves[:ply - 1]:
         board_before.push_uci(uci)
     played_move = chess.Move.from_uci(moves[ply - 1])
+    best_move_san = None
+    if best_move_uci is not None:
+        best_move = chess.Move.from_uci(best_move_uci)
+        if best_move not in board_before.legal_moves:
+            connection.rollback()
+            return error("Stockfish's recommended move is not legal in this position.")
+        best_move_san = board_before.san(best_move)
     if missed_win:
         grade = "Missed win"
     elif centipawn_loss <= 10 and is_brilliant_sacrifice(board_before, played_move):
@@ -2073,6 +2091,7 @@ def submit_move_analysis(code: str):
         "grade": grade,
         "centipawnLoss": centipawn_loss,
         "evaluation": evaluation,
+        "bestMoveSan": best_move_san,
     }
     connection.execute(
         "UPDATE games SET grades_json = ? WHERE id = ?",
@@ -2080,6 +2099,76 @@ def submit_move_analysis(code: str):
     )
     connection.commit()
     return jsonify(room_snapshot(load_room(code.upper()), fresh_side))
+
+
+@bp.post("/api/rooms/<code>/review/<int:ply>/alternatives")
+def review_move_alternatives(code: str, ply: int):
+    room, _side, failure = authorized_room(code)
+    if failure:
+        return failure
+    if room["status"] != "completed":
+        return error("Move alternatives are available after the game is complete.", 409)
+    moves = json.loads(room["moves_json"])
+    candidates = json_body().get("moves")
+    if (
+        not 1 <= ply <= len(moves)
+        or not isinstance(candidates, list)
+        or not 1 <= len(candidates) <= 4
+        or any(
+            not isinstance(uci, str)
+            or not re.fullmatch(r"[a-h][1-8][a-h][1-8][qrbn]?", uci)
+            for uci in candidates
+        )
+        or len(set(candidates)) != len(candidates)
+    ):
+        return error("The requested review moves are invalid.")
+
+    board = chess.Board()
+    for uci in moves[:ply - 1]:
+        board.push_uci(uci)
+    alternatives = []
+    for uci in candidates:
+        move = chess.Move.from_uci(uci)
+        if move not in board.legal_moves:
+            return error("A Stockfish review move is not legal in this position.")
+        piece = board.piece_at(move.from_square)
+        captured = board.piece_at(move.to_square)
+        if board.is_en_passant(move):
+            captured = board.piece_at(
+                move.to_square - 8 if board.turn else move.to_square + 8
+            )
+        san = board.san(move)
+        side_to_move = board.turn
+        board.push(move)
+        attacked_targets = [
+            (square, board.piece_at(square))
+            for square in board.attacks(move.to_square)
+            if board.piece_at(square) is not None
+            and board.piece_at(square).color != side_to_move
+        ]
+        attacked_targets.sort(
+            key=lambda target: target[1].piece_type if target[1] else 0,
+            reverse=True,
+        )
+        attacked_square, attacked_piece = attacked_targets[0] if attacked_targets else (None, None)
+        alternatives.append({
+            "uci": uci,
+            "san": san,
+            "from": chess.square_name(move.from_square),
+            "to": chess.square_name(move.to_square),
+            "piece": chess.piece_name(piece.piece_type) if piece else "piece",
+            "captured": chess.piece_name(captured.piece_type) if captured else None,
+            "attackedTarget": (
+                {
+                    "square": chess.square_name(attacked_square),
+                    "piece": chess.piece_name(attacked_piece.piece_type),
+                    "color": "white" if attacked_piece.color else "black",
+                }
+                if attacked_piece is not None else None
+            ),
+        })
+        board.pop()
+    return jsonify(alternatives=alternatives)
 
 
 @bp.post("/api/rooms/<code>/forfeit")
