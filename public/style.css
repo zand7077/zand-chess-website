@@ -164,12 +164,14 @@ h1,h2,p { margin: 0; }
 .review-mode #game-review-panel { max-height: 82vh; overflow: auto; padding: 16px; }
 .square.review-played-square::after { position: absolute; z-index: 1; inset: 0; border: 2px solid #bd985c; background: #d7b76b33; content: ""; pointer-events: none; }
 .board #review-arrow-overlay { position: absolute; z-index: 5; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
-.review-move-arrow { fill: none; stroke: #3e8b52; stroke-width: 13; stroke-linecap: round; stroke-linejoin: round; opacity: .9; filter: drop-shadow(0 2px 2px #1f382c88); }
-.review-arrow-head { fill: #3e8b52; stroke: #f7f5ed; stroke-width: .8; }
-.square.review-candidate-from { background-image: linear-gradient(#3e8b5244,#3e8b5244); }
-.square.review-candidate-to { background-image: linear-gradient(#3e8b5233,#3e8b5233); }
-.square.review-threat-target::after { position: absolute; z-index: 4; inset: 10%; border: 4px solid #b63d36; border-radius: 50%; background: #c83e3522; box-shadow: inset 0 0 0 2px #fff8,0 0 0 2px #70241e77; content: ""; pointer-events: none; animation: reviewThreatPulse 1.8s ease-in-out infinite; }
-@keyframes reviewThreatPulse { 0%,100% { transform: scale(.94); opacity: .84; } 50% { transform: scale(1); opacity: 1; } }
+.review-move-arrow-halo { fill: none; stroke: #f6f1e4; stroke-width: 16; stroke-linecap: round; stroke-linejoin: round; opacity: .9; }
+.review-move-arrow { fill: none; stroke: #398451; stroke-width: 8; stroke-linecap: round; stroke-linejoin: round; filter: drop-shadow(0 1px 2px #203c2e88); }
+.review-arrow-head { fill: #398451; stroke: #f6f1e4; stroke-width: 1.1; stroke-linejoin: round; }
+.square.review-candidate-from { background-image: linear-gradient(#39845135,#39845135); box-shadow: inset 0 0 0 2px #347649cc; }
+.square.review-candidate-to { background-image: radial-gradient(circle, #3984511a 0 52%,transparent 54%),linear-gradient(#39845145,#39845145); box-shadow: inset 0 0 0 2px #347649; }
+.square.review-threat-target::after { position: absolute; z-index: 4; inset: 11%; border: 2px solid #a93c35; border-radius: 50%; background: #c83e351c; box-shadow: inset 0 0 0 1px #fff9,0 0 0 1px #70241e66; content: ""; pointer-events: none; animation: reviewThreatPulse 2.2s ease-in-out infinite; }
+@keyframes reviewThreatPulse { 0%,100% { transform: scale(.96); opacity: .84; } 50% { transform: scale(1); opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .square.review-threat-target::after { animation: none; } }
 .empty-history { display: grid; place-content: center; min-height: 65px; text-align: center; color: #77766f; font-size: 9px; line-height: 1.6; }
 .empty-history span { color: var(--violet); font-size: 17px; }
 .action-row { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0,1fr) minmax(58px,.65fr) minmax(58px,.6fr) 46px; gap: 8px; min-width: 0; }

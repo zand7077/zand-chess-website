@@ -484,15 +484,18 @@ function makeBoard() {
   marker.setAttribute("markerUnits", "userSpaceOnUse");
   marker.setAttribute("orient", "auto");
   const arrowHead = document.createElementNS("http://www.w3.org/2000/svg", "path");
-  arrowHead.setAttribute("d", "M 1 1 L 11 6 L 1 11 Z");
+  arrowHead.setAttribute("d", "M 1 1 L 11 6 L 1 11 L 3.5 6 Z");
   arrowHead.classList.add("review-arrow-head");
   marker.append(arrowHead);
   defs.append(marker);
+  const arrowHalo = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  arrowHalo.id = "review-move-arrow-halo";
+  arrowHalo.classList.add("review-move-arrow-halo");
   const arrow = document.createElementNS("http://www.w3.org/2000/svg", "path");
   arrow.id = "review-move-arrow";
   arrow.setAttribute("marker-end", "url(#review-arrow-head)");
   arrow.classList.add("review-move-arrow");
-  overlay.append(defs, arrow);
+  overlay.append(defs, arrowHalo, arrow);
   boardElement.append(overlay);
   boardElement.addEventListener("pointerdown", beginPiecePointer);
   boardElement.addEventListener("pointermove", movePiecePointer, { passive: false });
@@ -610,9 +613,11 @@ function setBoardOrientation() {
 
 function renderReviewArrow(candidate) {
   const arrow = document.querySelector("#review-move-arrow");
+  const halo = document.querySelector("#review-move-arrow-halo");
   if (!arrow) return;
   if (!candidate || state.reviewPly === null) {
     arrow.setAttribute("d", "");
+    halo?.setAttribute("d", "");
     return;
   }
   const from = squareCoords(candidate.from);
@@ -626,14 +631,16 @@ function renderReviewArrow(candidate) {
   let x2 = (toCol + 0.5) * 125;
   let y2 = (toRow + 0.5) * 125;
   const length = Math.hypot(x2 - x1, y2 - y1);
-  const inset = Math.min(37, length * 0.2);
+  const inset = Math.min(46, length * 0.28);
   const unitX = (x2 - x1) / length;
   const unitY = (y2 - y1) / length;
   x1 += unitX * inset;
   y1 += unitY * inset;
   x2 -= unitX * inset;
   y2 -= unitY * inset;
-  arrow.setAttribute("d", `M ${x1} ${y1} L ${x2} ${y2}`);
+  const path = `M ${x1} ${y1} L ${x2} ${y2}`;
+  arrow.setAttribute("d", path);
+  halo?.setAttribute("d", path);
 }
 
 function reviewPositionBoard(ply) {
