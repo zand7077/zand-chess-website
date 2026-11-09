@@ -7,6 +7,8 @@ const accountForm = document.querySelector("#account-form");
 let isRegistering = false;
 let signedInUser = null;
 let friendIds = new Set();
+let sentRequestIds = new Set();
+let receivedRequestMap = new Map();
 let dashboardTimer = null;
 let globalChatTimer = null;
 let globalChatKey = "";
@@ -126,6 +128,7 @@ async function joinInvitation(invite) {
 }
 
 function leaderboardEntry(container, leader) {
+  const leaderId = Number(leader.id);
   const row = document.createElement("div");
   row.className = "leaderboard-entry";
   const summary = document.createElement("button");
@@ -151,26 +154,54 @@ function leaderboardEntry(container, leader) {
   const profileButton = button("View profile", () => {
     openPlayerProfile(leader.id).catch((error) => tell(error.message));
   });
-  const friendButton = button("Send friend request", async () => {
-    try {
-      await api("/api/friends/requests", {
-        method: "POST",
-        body: JSON.stringify({ username: leader.username }),
-      });
-      tell(`Friend request sent to ${leader.username}.`);
-      await loadDashboard();
-    } catch (error) {
-      tell(error.message);
-    }
-  }, true);
-  if (friendIds.has(Number(leader.id))) {
-    friendButton.textContent = "Friends";
-    friendButton.disabled = true;
-    friendButton.title = "You are already friends.";
-  } else if (signedInUser?.id === leader.id) {
-    friendButton.textContent = "Your account";
+
+  let friendButton;
+  if (signedInUser?.id === leaderId) {
+    friendButton = button("Your account", () => {}, false);
     friendButton.disabled = true;
     friendButton.title = "This is your account.";
+  } else if (friendIds.has(leaderId)) {
+    friendButton = button("Friends", () => {}, false);
+    friendButton.disabled = true;
+    friendButton.title = "You are already friends.";
+  } else if (sentRequestIds.has(leaderId)) {
+    friendButton = button("Request sent", () => {}, false);
+    friendButton.disabled = true;
+    friendButton.title = "Friend request sent.";
+  } else if (receivedRequestMap.has(leaderId)) {
+    const requestId = receivedRequestMap.get(leaderId);
+    friendButton = button("Accept request", async () => {
+      try {
+        await api(`/api/friends/requests/${requestId}`, {
+          method: "POST",
+          body: JSON.stringify({ accept: true }),
+        });
+        tell(`You and ${leader.username} are now friends.`);
+        await loadDashboard();
+      } catch (error) {
+        tell(error.message);
+      }
+    }, true);
+  } else {
+    friendButton = button("Send friend request", async () => {
+      try {
+        const result = await api("/api/friends/requests", {
+          method: "POST",
+          body: JSON.stringify({ userId: leaderId, username: leader.username }),
+        });
+        if (result.status === "friends") {
+          tell(`You and ${leader.username} are now friends.`);
+        } else {
+          tell(`Friend request sent to ${leader.username}.`);
+          sentRequestIds.add(leaderId);
+          friendButton.textContent = "Request sent";
+          friendButton.disabled = true;
+        }
+        await loadDashboard();
+      } catch (error) {
+        tell(error.message);
+      }
+    }, true);
   }
   actions.append(profileButton, friendButton);
   summary.addEventListener("click", () => {
@@ -322,20 +353,36 @@ function renderGlobalChat(messages) {
   for (const chatMessage of messages) {
     const entry = document.createElement("article");
     entry.className = `global-chat-entry${chatMessage.own ? " own" : ""}`;
-    const copy = document.createElement("div");
-    copy.className = "global-chat-copy";
+
+    const avatar = document.createElement("div");
+    avatar.className = "global-chat-avatar";
+    const initial = (chatMessage.username || "?").charAt(0).toUpperCase();
+    avatar.textContent = initial;
+
+    const bodyContainer = document.createElement("div");
+    bodyContainer.className = "global-chat-body";
+
+    const header = document.createElement("div");
+    header.className = "global-chat-header";
     const author = document.createElement("strong");
+    author.className = "global-chat-author";
     author.textContent = chatMessage.own ? "You" : chatMessage.username;
-    const body = document.createElement("p");
-    body.textContent = chatMessage.message;
     const sentAt = document.createElement("time");
+    sentAt.className = "global-chat-time";
     sentAt.dateTime = new Date(chatMessage.createdAt).toISOString();
     sentAt.textContent = new Date(chatMessage.createdAt).toLocaleTimeString([], {
       hour: "numeric",
       minute: "2-digit",
     });
-    copy.append(author, body, sentAt);
-    entry.append(copy);
+    header.append(author, sentAt);
+
+    const bubble = document.createElement("div");
+    bubble.className = "global-chat-bubble";
+    const text = document.createElement("p");
+    text.textContent = chatMessage.message;
+    bubble.append(text);
+
+    bodyContainer.append(header, bubble);
 
     if (!chatMessage.own && signedInUser) {
       const actions = document.createElement("div");
@@ -385,8 +432,9 @@ function renderGlobalChat(messages) {
           }
         }));
       }
-      entry.append(actions);
+      bodyContainer.append(actions);
     }
+    entry.append(avatar, bodyContainer);
     container.append(entry);
   }
   if (wasNearBottom) container.scrollTop = container.scrollHeight;
@@ -592,6 +640,8 @@ async function loadDashboard() {
   try {
     const data = await api("/api/dashboard");
     friendIds = new Set(data.friends.map((friend) => Number(friend.id)));
+    sentRequestIds = new Set((data.sentRequests || []).map((req) => Number(req.userId || req.user_id)));
+    receivedRequestMap = new Map((data.requests || []).map((req) => [Number(req.user_id || req.userId), req.id]));
     void loadLeaderboard();
     const friends = document.querySelector("#friend-list");
     friends.replaceChildren();
