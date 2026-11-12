@@ -743,15 +743,17 @@ function makeBoard() {
 function setBoardOrientation() {
   const isReviewing = state.reviewPly !== null;
   const positionBoard = isReviewing
-    ? reviewPositionBoard(Math.max(0, state.reviewPly - 1))
+    ? reviewPositionBoard(state.reviewPly)
     : state.game.board;
   const reviewMove = isReviewing && state.reviewPly > 0
     ? state.game.history[state.reviewPly - 1]
     : null;
   const positionTurn = isReviewing
-    ? reviewPlyTurn(Math.max(0, state.reviewPly - 1))
+    ? reviewPlyTurn(state.reviewPly)
     : state.game.turn;
-  const positionCheck = isReviewing ? false : state.game.check;
+  const positionCheck = isReviewing
+    ? (state.reviewPly > 0 ? Boolean(state.game.history[state.reviewPly - 1]?.check) : false)
+    : state.game.check;
   const selectedCandidate = state.reviewCandidates.find(
     (candidate) => candidate.uci === state.reviewSelectedCandidate,
   ) || state.reviewCandidates[0];
@@ -1570,7 +1572,7 @@ async function updateGame(next, animate = false) {
   }
   render();
   if (!previousGameOver && next.over && next.coinsEarned > 0) {
-    showToast(`You earned ${next.coinsEarned} coins for this win!`);
+    showToast(`You earned ${next.coinsEarned} coins!`);
   }
   if (highlightedGrade) showGradePopup(highlightedGrade);
   if (animate && next.lastMove?.captured && next.lastMove !== oldLastMove) animateCapture();

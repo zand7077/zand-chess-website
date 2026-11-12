@@ -7,8 +7,8 @@ const accountForm = document.querySelector("#account-form");
 let isRegistering = false;
 let signedInUser = null;
 let friendIds = new Set();
-let sentFriendIds = new Set();
-let incomingFriendRequests = new Map();
+let sentRequestIds = new Set();
+let receivedRequestMap = new Map();
 let dashboardTimer = null;
 let globalChatTimer = null;
 let globalChatKey = "";
@@ -130,6 +130,7 @@ async function joinInvitation(invite) {
 }
 
 function leaderboardEntry(container, leader) {
+  const leaderId = Number(leader.id);
   const row = document.createElement("div");
   row.className = "leaderboard-entry";
   const summary = document.createElement("button");
@@ -155,57 +156,54 @@ function leaderboardEntry(container, leader) {
   const profileButton = button("View profile", () => {
     openPlayerProfile(leader.id).catch((error) => tell(error.message));
   });
-  const friendId = Number(leader.id);
-  const incomingRequestId = incomingFriendRequests.get(friendId);
-  const sendFriendRequest = async () => {
-    if (!signedInUser) {
-      tell("Sign in to send a friend request.");
-      return;
-    }
+
+  let friendButton;
+  if (signedInUser?.id === leaderId) {
+    friendButton = button("Your account", () => {}, false);
     friendButton.disabled = true;
-    friendButton.textContent = incomingRequestId === undefined ? "Sending…" : "Accepting…";
-    try {
-      if (incomingRequestId !== undefined) {
-        await api(`/api/friends/requests/${incomingRequestId}`, {
+    friendButton.title = "This is your account.";
+  } else if (friendIds.has(leaderId)) {
+    friendButton = button("Friends", () => {}, false);
+    friendButton.disabled = true;
+    friendButton.title = "You are already friends.";
+  } else if (sentRequestIds.has(leaderId)) {
+    friendButton = button("Request sent", () => {}, false);
+    friendButton.disabled = true;
+    friendButton.title = "Friend request sent.";
+  } else if (receivedRequestMap.has(leaderId)) {
+    const requestId = receivedRequestMap.get(leaderId);
+    friendButton = button("Accept request", async () => {
+      try {
+        await api(`/api/friends/requests/${requestId}`, {
           method: "POST",
           body: JSON.stringify({ accept: true }),
         });
         tell(`You and ${leader.username} are now friends.`);
-      } else {
+        await loadDashboard();
+      } catch (error) {
+        tell(error.message);
+      }
+    }, true);
+  } else {
+    friendButton = button("Send friend request", async () => {
+      try {
         const result = await api("/api/friends/requests", {
           method: "POST",
-          body: JSON.stringify({ userId: friendId }),
+          body: JSON.stringify({ userId: leaderId, username: leader.username }),
         });
-        tell(result.status === "friends"
-          ? `You and ${leader.username} are now friends.`
-          : `Friend request sent to ${leader.username}.`);
+        if (result.status === "friends") {
+          tell(`You and ${leader.username} are now friends.`);
+        } else {
+          tell(`Friend request sent to ${leader.username}.`);
+          sentRequestIds.add(leaderId);
+          friendButton.textContent = "Request sent";
+          friendButton.disabled = true;
+        }
+        await loadDashboard();
+      } catch (error) {
+        tell(error.message);
       }
-      await loadDashboard();
-    } catch (error) {
-      friendButton.disabled = false;
-      friendButton.textContent = "Send friend request";
-      tell(error.message);
-    }
-  };
-  const friendButton = button("Send friend request", sendFriendRequest, true);
-  if (!signedInUser) {
-    friendButton.textContent = "Sign in to add";
-    friendButton.disabled = true;
-    friendButton.title = "Sign in to send friend requests.";
-  } else if (friendIds.has(friendId)) {
-    friendButton.textContent = "Friends";
-    friendButton.disabled = true;
-    friendButton.title = "You are already friends.";
-  } else if (signedInUser.id === friendId) {
-    friendButton.textContent = "Your account";
-    friendButton.disabled = true;
-    friendButton.title = "This is your account.";
-  } else if (incomingRequestId !== undefined) {
-    friendButton.textContent = "Accept request";
-  } else if (sentFriendIds.has(friendId)) {
-    friendButton.textContent = "Request sent";
-    friendButton.disabled = true;
-    friendButton.title = "Your friend request is waiting for a response.";
+    }, true);
   }
   actions.append(profileButton, friendButton);
   summary.addEventListener("click", () => {
@@ -371,28 +369,36 @@ function renderGlobalChat(messages) {
   for (const chatMessage of messages) {
     const entry = document.createElement("article");
     entry.className = `global-chat-entry${chatMessage.own ? " own" : ""}`;
-    const avatar = document.createElement("span");
+
+    const avatar = document.createElement("div");
     avatar.className = "global-chat-avatar";
-    avatar.textContent = chatMessage.username.slice(0, 1).toUpperCase();
-    avatar.setAttribute("aria-hidden", "true");
-    const copy = document.createElement("div");
-    copy.className = "global-chat-copy";
-    const heading = document.createElement("div");
-    heading.className = "global-chat-message-heading";
+    const initial = (chatMessage.username || "?").charAt(0).toUpperCase();
+    avatar.textContent = initial;
+
+    const bodyContainer = document.createElement("div");
+    bodyContainer.className = "global-chat-body";
+
+    const header = document.createElement("div");
+    header.className = "global-chat-header";
     const author = document.createElement("strong");
+    author.className = "global-chat-author";
     author.textContent = chatMessage.own ? "You" : chatMessage.username;
     const sentAt = document.createElement("time");
+    sentAt.className = "global-chat-time";
     sentAt.dateTime = new Date(chatMessage.createdAt).toISOString();
     sentAt.textContent = new Date(chatMessage.createdAt).toLocaleTimeString([], {
       hour: "numeric",
       minute: "2-digit",
     });
-    heading.append(author, sentAt);
-    const body = document.createElement("p");
-    body.className = "global-chat-bubble";
-    body.textContent = chatMessage.message;
-    copy.append(heading, body);
-    entry.append(avatar, copy);
+    header.append(author, sentAt);
+
+    const bubble = document.createElement("div");
+    bubble.className = "global-chat-bubble";
+    const text = document.createElement("p");
+    text.textContent = chatMessage.message;
+    bubble.append(text);
+
+    bodyContainer.append(header, bubble);
 
     if (!chatMessage.own && signedInUser) {
       const actions = document.createElement("div");
@@ -442,8 +448,9 @@ function renderGlobalChat(messages) {
           }
         }));
       }
-      entry.append(actions);
+      bodyContainer.append(actions);
     }
+    entry.append(avatar, bodyContainer);
     container.append(entry);
   }
   const jumpButton = document.querySelector("#global-chat-latest");
@@ -670,11 +677,8 @@ async function loadDashboard() {
   try {
     const data = await api("/api/dashboard");
     friendIds = new Set(data.friends.map((friend) => Number(friend.id)));
-    sentFriendIds = new Set(data.sentRequests.map((request) => Number(request.user_id)));
-    incomingFriendRequests = new Map(
-      data.requests.map((request) => [Number(request.user_id), request.id]),
-    );
-    if (openAcceptedInvitation(data.games)) return;
+    sentRequestIds = new Set((data.sentRequests || []).map((req) => Number(req.userId || req.user_id)));
+    receivedRequestMap = new Map((data.requests || []).map((req) => [Number(req.user_id || req.userId), req.id]));
     void loadLeaderboard();
     const friends = document.querySelector("#friend-list");
     friends.replaceChildren();

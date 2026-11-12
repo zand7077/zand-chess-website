@@ -45,7 +45,7 @@ chat log with animated typing indicators and speech bubbles above each
 player's avatar. On phones, use the floating **Chat** button to open the game
 chat without scrolling; one-tap quick messages are available there as well.
 
-Open **Shop** in the lobby to collect 100 free coins once per UTC day and unlock
+Open **Shop** in the lobby to collect 200 free coins once per UTC day and unlock
 board-half color themes and piece sets, including the 500-coin Celestial Atlas
 board theme with its star-map detailing and premium Spatial and Chessnut art
 sets.
@@ -61,12 +61,11 @@ Alexis Luengas and distributed under Apache 2.0. See the bundled
 ([chess-art](https://github.com/maurimo/chess-art),
 [chessnut-pieces](https://github.com/LexLuengas/chessnut-pieces)).
 
-Completed games award coins to registered players after at least eight plies.
-Bot wins grant 1, 3, or 5 coins at 200, 1000, or 1600 Elo, respectively, with a
-10-coin daily bot cap. In ranked human games, winners receive 25–50 coins and
-losers receive a smaller 12–25 coin reward based on the rating difference.
-Players have a 150-coin daily cap and earn game rewards against each opponent
-once per UTC day. Draws, guest players, and short games do not earn game coins.
+Completed games award coins to registered accounts after at least eight plies.
+Bot games grant up to 35 coins for wins, 18 for draws, and 10 for losses with a
+60-coin daily bot cap. Human games grant 20–60 coins for wins, 10–35 for draws,
+and 5–20 for losses based on relative Elo, with a 250-coin daily cap and one reward
+per opponent per UTC day. Guest players and short games do not earn game coins.
 
 Usernames must be 3–20 letters, numbers, or underscores. Passwords must be at
 least 10 characters. Friend requests must be accepted before either player can
