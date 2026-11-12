@@ -30,7 +30,7 @@
     <section id="account-panel" class="account-panel">
       <div class="intro">
         <span class="eyebrow">YOUR NEXT MATCH</span>
-        <h1>Chess is better together.</h1>
+        <h1>Chess is better with friends.</h1>
         <p>Play a friend, or create a room and share its link with anyone.</p>
       </div>
       <div class="account-card">
@@ -159,22 +159,34 @@
       aria-labelledby="global-chat-title">
       <div class="section-title global-chat-heading">
         <div><span class="eyebrow">THE CHESS COMMUNITY</span><h1 id="global-chat-title">Global chat</h1></div>
-        <span class="muted">Chat with players and find your next opponent</span>
+        <div class="global-chat-toolbar">
+          <span class="global-chat-live"><span aria-hidden="true"></span>Live · refreshes every 3 seconds</span>
+          <span id="global-chat-count" class="global-chat-count">0 messages</span>
+          <button id="global-chat-refresh" class="button quiet" type="button">Refresh</button>
+        </div>
       </div>
       <div id="global-chat-messages" class="global-chat-messages"
         role="log" aria-live="polite" aria-relevant="additions text">
         <p class="muted">Loading chat…</p>
       </div>
+      <button id="global-chat-latest" class="global-chat-latest hidden" type="button">
+        New messages · jump to latest
+      </button>
       <div class="global-chat-composer">
         <div class="global-chat-composer-heading">
           <label for="global-chat-input">Write a message</label>
-          <span>Public · up to 280 characters</span>
+          <span id="global-chat-character-count">0 / 280</span>
         </div>
         <form id="global-chat-form" class="global-chat-form hidden">
           <input id="global-chat-input" maxlength="280" autocomplete="off"
             placeholder="Say hello or request a game…" required>
           <button id="global-chat-send" class="button primary" type="submit">Send</button>
         </form>
+        <div class="global-chat-prompts" aria-label="Message suggestions">
+          <button class="global-chat-prompt" type="button" data-chat-prompt="Anyone up for a game?">♟ Find a game</button>
+          <button class="global-chat-prompt" type="button" data-chat-prompt="Good game!">✦ Good game</button>
+          <button class="global-chat-prompt" type="button" data-chat-prompt="What time control do you like?">◷ Talk chess</button>
+        </div>
         <p id="global-chat-login" class="global-chat-login hidden">
           <button id="global-chat-sign-in" class="text-button" type="button">Sign in to chat, add players, and send game invitations.</button>
         </p>

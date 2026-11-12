@@ -31,7 +31,8 @@ rating, account age, match record, and recent completed games, or send a friend
 request.
 
 Friend invitations stay in the lobby after they are sent, so you can keep
-using the site while your friend decides when to join. The room remains in
+using the site while your friend decides when to join. When they accept and
+join, the inviter is taken straight into the game. The room also remains in
 **Your games**, where you can return to it or close it. Invitation colors are
 randomly assigned. The community tabs also list active live matches; choose
 **Spectate** to watch a game without joining it or affecting either player's
@@ -60,11 +61,12 @@ Alexis Luengas and distributed under Apache 2.0. See the bundled
 ([chess-art](https://github.com/maurimo/chess-art),
 [chessnut-pieces](https://github.com/LexLuengas/chessnut-pieces)).
 
-Completed games award coins to the winning account after at least eight plies.
+Completed games award coins to registered players after at least eight plies.
 Bot wins grant 1, 3, or 5 coins at 200, 1000, or 1600 Elo, respectively, with a
-10-coin daily bot cap. Human wins grant 8–30 coins based on the opponent's Elo,
-with a 90-coin daily cap and one reward per opponent per UTC day. Draws, losses,
-guest winners, and short games do not earn game coins.
+10-coin daily bot cap. In ranked human games, winners receive 25–50 coins and
+losers receive a smaller 12–25 coin reward based on the rating difference.
+Players have a 150-coin daily cap and earn game rewards against each opponent
+once per UTC day. Draws, guest players, and short games do not earn game coins.
 
 Usernames must be 3–20 letters, numbers, or underscores. Passwords must be at
 least 10 characters. Friend requests must be accepted before either player can
@@ -87,8 +89,9 @@ Move grades and position evaluations use the Stockfish 19 Lite single-threaded
 WebAssembly engine in the browser. The engine assets are served from `public/`,
 so they do not require runtime downloads or a Stockfish process on the Wasmer
 server. Near-best moves that offer an opponent a legal capture of a non-pawn
-piece are highlighted as Brilliant. First-use engine loading may take a moment,
-and analysis uses the player's device. Stockfish.js is GPL-3.0; its license
+piece are highlighted as Brilliant. Game analysis uses shorter searches to
+return move grades sooner; bot search strength is unchanged. First-use engine
+loading may take a moment, and analysis uses the player's device. Stockfish.js is GPL-3.0; its license
 and authors are in `public/engine/Copying.txt` and `public/engine/AUTHORS.txt`.
 The corresponding source is available at
 [Stockfish.js v19.0.1](https://github.com/nmrugg/stockfish.js/tree/v19.0.1).

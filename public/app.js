@@ -170,14 +170,14 @@ function stockfishScore(fen) {
       stockfish.postMessage("setoption name MultiPV value 1");
       stockfish.postMessage("setoption name Skill Level value 20");
       stockfish.postMessage(`position fen ${fen}`);
-      stockfish.postMessage("go movetime 80");
+      stockfish.postMessage("go movetime 60");
     });
   });
   engineQueue = request.catch(() => {});
   return request;
 }
 
-function stockfishBestMove(fen, elo, skillLevel = BOT_SKILL_LEVELS[elo]) {
+function stockfishBestMove(fen, elo, skillLevel = BOT_SKILL_LEVELS[elo], movetime = 350) {
   const request = engineQueue.then(async () => {
     await initializeStockfish();
     return new Promise((resolve, reject) => {
@@ -195,7 +195,7 @@ function stockfishBestMove(fen, elo, skillLevel = BOT_SKILL_LEVELS[elo]) {
       stockfish.postMessage("setoption name MultiPV value 1");
       stockfish.postMessage(`setoption name Skill Level value ${skillLevel}`);
       stockfish.postMessage(`position fen ${fen}`);
-      stockfish.postMessage("go movetime 350");
+      stockfish.postMessage(`go movetime ${movetime}`);
     });
   });
   engineQueue = request.catch(() => {});
@@ -221,7 +221,7 @@ function stockfishCandidates(fen, count = 4) {
       stockfish.postMessage(`setoption name MultiPV value ${count}`);
       stockfish.postMessage("setoption name Skill Level value 20");
       stockfish.postMessage(`position fen ${fen}`);
-      stockfish.postMessage("go movetime 650");
+      stockfish.postMessage("go movetime 450");
     });
   });
   engineQueue = request.catch(() => {});
@@ -235,7 +235,7 @@ async function analyzeLastMove(beforeFen, next, ply) {
   const afterScore = await stockfishScore(next.fen);
   let bestMove = null;
   try {
-    bestMove = await stockfishBestMove(beforeFen, 1600, 20);
+    bestMove = await stockfishBestMove(beforeFen, 1600, 20, 180);
   } catch (error) {
     showToast(`Stockfish could not find a recommended move: ${error.message}`);
   }
@@ -748,7 +748,9 @@ function setBoardOrientation() {
   const reviewMove = isReviewing && state.reviewPly > 0
     ? state.game.history[state.reviewPly - 1]
     : null;
-  const positionTurn = reviewPlyTurn(Math.max(0, state.reviewPly - 1));
+  const positionTurn = isReviewing
+    ? reviewPlyTurn(Math.max(0, state.reviewPly - 1))
+    : state.game.turn;
   const positionCheck = isReviewing ? false : state.game.check;
   const selectedCandidate = state.reviewCandidates.find(
     (candidate) => candidate.uci === state.reviewSelectedCandidate,

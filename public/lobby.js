@@ -7,9 +7,13 @@ const accountForm = document.querySelector("#account-form");
 let isRegistering = false;
 let signedInUser = null;
 let friendIds = new Set();
+let sentFriendIds = new Set();
+let incomingFriendRequests = new Map();
 let dashboardTimer = null;
 let globalChatTimer = null;
 let globalChatKey = "";
+let globalChatLastMessageId = null;
+let globalChatInitialized = false;
 let inviteUrl = "";
 let inviteTimeResolver = null;
 const notifiedInvitationCodes = new Set();
@@ -151,26 +155,57 @@ function leaderboardEntry(container, leader) {
   const profileButton = button("View profile", () => {
     openPlayerProfile(leader.id).catch((error) => tell(error.message));
   });
-  const friendButton = button("Send friend request", async () => {
+  const friendId = Number(leader.id);
+  const incomingRequestId = incomingFriendRequests.get(friendId);
+  const sendFriendRequest = async () => {
+    if (!signedInUser) {
+      tell("Sign in to send a friend request.");
+      return;
+    }
+    friendButton.disabled = true;
+    friendButton.textContent = incomingRequestId === undefined ? "Sending…" : "Accepting…";
     try {
-      await api("/api/friends/requests", {
-        method: "POST",
-        body: JSON.stringify({ username: leader.username }),
-      });
-      tell(`Friend request sent to ${leader.username}.`);
+      if (incomingRequestId !== undefined) {
+        await api(`/api/friends/requests/${incomingRequestId}`, {
+          method: "POST",
+          body: JSON.stringify({ accept: true }),
+        });
+        tell(`You and ${leader.username} are now friends.`);
+      } else {
+        const result = await api("/api/friends/requests", {
+          method: "POST",
+          body: JSON.stringify({ userId: friendId }),
+        });
+        tell(result.status === "friends"
+          ? `You and ${leader.username} are now friends.`
+          : `Friend request sent to ${leader.username}.`);
+      }
       await loadDashboard();
     } catch (error) {
+      friendButton.disabled = false;
+      friendButton.textContent = "Send friend request";
       tell(error.message);
     }
-  }, true);
-  if (friendIds.has(Number(leader.id))) {
+  };
+  const friendButton = button("Send friend request", sendFriendRequest, true);
+  if (!signedInUser) {
+    friendButton.textContent = "Sign in to add";
+    friendButton.disabled = true;
+    friendButton.title = "Sign in to send friend requests.";
+  } else if (friendIds.has(friendId)) {
     friendButton.textContent = "Friends";
     friendButton.disabled = true;
     friendButton.title = "You are already friends.";
-  } else if (signedInUser?.id === leader.id) {
+  } else if (signedInUser.id === friendId) {
     friendButton.textContent = "Your account";
     friendButton.disabled = true;
     friendButton.title = "This is your account.";
+  } else if (incomingRequestId !== undefined) {
+    friendButton.textContent = "Accept request";
+  } else if (sentFriendIds.has(friendId)) {
+    friendButton.textContent = "Request sent";
+    friendButton.disabled = true;
+    friendButton.title = "Your friend request is waiting for a response.";
   }
   actions.append(profileButton, friendButton);
   summary.addEventListener("click", () => {
@@ -298,6 +333,13 @@ function globalChatStatus(text) {
   document.querySelector("#global-chat-status").textContent = text;
 }
 
+function updateGlobalChatCharacterCount() {
+  const input = document.querySelector("#global-chat-input");
+  const counter = document.querySelector("#global-chat-character-count");
+  counter.textContent = `${input.value.length} / 280`;
+  counter.classList.toggle("near-limit", input.value.length >= 250);
+}
+
 function globalChatAction(text, action, disabled = false, primary = false) {
   const control = button(text, action, primary);
   control.disabled = disabled;
@@ -311,31 +353,46 @@ function renderGlobalChat(messages) {
   globalChatKey = key;
   const wasNearBottom =
     container.scrollHeight - container.scrollTop - container.clientHeight < 64;
+  const latestMessageId = messages.at(-1)?.id ?? null;
+  const hasNewMessages = globalChatInitialized && latestMessageId !== globalChatLastMessageId;
+  globalChatLastMessageId = latestMessageId;
+  globalChatInitialized = true;
+  document.querySelector("#global-chat-count").textContent =
+    `${messages.length} ${messages.length === 1 ? "message" : "messages"}`;
   container.replaceChildren();
   if (!messages.length) {
     const empty = document.createElement("p");
     empty.className = "muted";
     empty.textContent = "No messages yet. Start the conversation.";
     container.append(empty);
+    document.querySelector("#global-chat-latest").classList.add("hidden");
     return;
   }
   for (const chatMessage of messages) {
     const entry = document.createElement("article");
     entry.className = `global-chat-entry${chatMessage.own ? " own" : ""}`;
+    const avatar = document.createElement("span");
+    avatar.className = "global-chat-avatar";
+    avatar.textContent = chatMessage.username.slice(0, 1).toUpperCase();
+    avatar.setAttribute("aria-hidden", "true");
     const copy = document.createElement("div");
     copy.className = "global-chat-copy";
+    const heading = document.createElement("div");
+    heading.className = "global-chat-message-heading";
     const author = document.createElement("strong");
     author.textContent = chatMessage.own ? "You" : chatMessage.username;
-    const body = document.createElement("p");
-    body.textContent = chatMessage.message;
     const sentAt = document.createElement("time");
     sentAt.dateTime = new Date(chatMessage.createdAt).toISOString();
     sentAt.textContent = new Date(chatMessage.createdAt).toLocaleTimeString([], {
       hour: "numeric",
       minute: "2-digit",
     });
-    copy.append(author, body, sentAt);
-    entry.append(copy);
+    heading.append(author, sentAt);
+    const body = document.createElement("p");
+    body.className = "global-chat-bubble";
+    body.textContent = chatMessage.message;
+    copy.append(heading, body);
+    entry.append(avatar, copy);
 
     if (!chatMessage.own && signedInUser) {
       const actions = document.createElement("div");
@@ -389,7 +446,13 @@ function renderGlobalChat(messages) {
     }
     container.append(entry);
   }
-  if (wasNearBottom) container.scrollTop = container.scrollHeight;
+  const jumpButton = document.querySelector("#global-chat-latest");
+  if (wasNearBottom) {
+    container.scrollTop = container.scrollHeight;
+    jumpButton.classList.add("hidden");
+  } else if (hasNewMessages) {
+    jumpButton.classList.remove("hidden");
+  }
 }
 
 async function loadGlobalChat() {
@@ -410,6 +473,8 @@ async function loadGlobalChat() {
 function setAccountView(user) {
   signedInUser = user;
   friendIds = new Set();
+  sentFriendIds = new Set();
+  incomingFriendRequests = new Map();
   shopState = null;
   const signedIn = Boolean(user);
   accountPanel.classList.toggle("hidden", signedIn);
@@ -417,6 +482,7 @@ function setAccountView(user) {
   document.querySelector("#logout-button").classList.toggle("hidden", !signedIn);
   document.querySelector("#global-chat-form").classList.toggle("hidden", !signedIn);
   document.querySelector("#global-chat-login").classList.toggle("hidden", signedIn);
+  document.querySelector(".global-chat-prompts").classList.toggle("hidden", !signedIn);
   void loadGlobalChat();
   if (activeView === "shop") void loadShop();
   if (signedIn) {
@@ -428,7 +494,7 @@ function setAccountView(user) {
     clearInterval(dashboardTimer);
     dashboardTimer = null;
   }
-  loadLeaderboard();
+  if (!signedIn) void loadLeaderboard();
 }
 
 function setLobbyView(view) {
@@ -587,11 +653,28 @@ async function loadShop() {
   }
 }
 
+function openAcceptedInvitation(games) {
+  if (window.location.pathname !== "/") return false;
+  const acceptedInvite = games.find((game) =>
+    game.is_creator && game.invited_user_id !== null && game.status === "active");
+  if (!acceptedInvite) return false;
+  const key = `auto-open-invitation:${acceptedInvite.room_code}`;
+  if (sessionStorage.getItem(key) === "1") return false;
+  sessionStorage.setItem(key, "1");
+  window.location.assign(`/play?room=${encodeURIComponent(acceptedInvite.room_code)}`);
+  return true;
+}
+
 async function loadDashboard() {
   if (!signedInUser) return;
   try {
     const data = await api("/api/dashboard");
     friendIds = new Set(data.friends.map((friend) => Number(friend.id)));
+    sentFriendIds = new Set(data.sentRequests.map((request) => Number(request.user_id)));
+    incomingFriendRequests = new Map(
+      data.requests.map((request) => [Number(request.user_id), request.id]),
+    );
+    if (openAcceptedInvitation(data.games)) return;
     void loadLeaderboard();
     const friends = document.querySelector("#friend-list");
     friends.replaceChildren();
@@ -908,6 +991,7 @@ document.querySelector("#global-chat-form").addEventListener("submit", async (ev
       body: JSON.stringify({ message: input.value }),
     });
     input.value = "";
+    updateGlobalChatCharacterCount();
     globalChatStatus("Message sent.");
     await loadGlobalChat();
   } catch (error) {
@@ -916,6 +1000,31 @@ document.querySelector("#global-chat-form").addEventListener("submit", async (ev
     sendButton.disabled = false;
   }
 });
+const globalChatMessages = document.querySelector("#global-chat-messages");
+globalChatMessages.addEventListener("scroll", () => {
+  if (globalChatMessages.scrollHeight - globalChatMessages.scrollTop -
+      globalChatMessages.clientHeight < 64) {
+    document.querySelector("#global-chat-latest").classList.add("hidden");
+  }
+});
+document.querySelector("#global-chat-latest").addEventListener("click", () => {
+  globalChatMessages.scrollTo({ top: globalChatMessages.scrollHeight, behavior: "smooth" });
+});
+document.querySelector("#global-chat-refresh").addEventListener("click", () => {
+  void loadGlobalChat();
+});
+document.querySelector("#global-chat-input").addEventListener(
+  "input",
+  updateGlobalChatCharacterCount,
+);
+for (const prompt of document.querySelectorAll(".global-chat-prompt")) {
+  prompt.addEventListener("click", () => {
+    const input = document.querySelector("#global-chat-input");
+    input.value = prompt.dataset.chatPrompt || "";
+    updateGlobalChatCharacterCount();
+    input.focus();
+  });
+}
 for (const [tabId, panelId, otherTabId, otherPanelId] of [
   ["leaderboard-tab", "leaderboard-panel", "live-matches-tab", "live-matches-panel"],
   ["live-matches-tab", "live-matches-panel", "leaderboard-tab", "leaderboard-panel"],

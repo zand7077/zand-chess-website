@@ -35,7 +35,7 @@ BOT_ELOS = {200, 1000, 1600}
 DAILY_COIN_REWARD = 100
 BOT_GAME_COIN_REWARDS = {200: 1, 1000: 3, 1600: 5}
 BOT_GAME_DAILY_CAP = 10
-PLAYER_GAME_DAILY_CAP = 90
+PLAYER_GAME_DAILY_CAP = 150
 MIN_REWARDED_GAME_PLIES = 8
 OWNER_USERNAME = "zand"
 SHOP_SKINS = {
@@ -1365,6 +1365,14 @@ def dashboard():
         """,
         (user["id"],),
     ).fetchall()
+    sent_requests = connection.execute(
+        """
+        SELECT r.id, u.id AS user_id, u.username FROM friend_requests r
+        JOIN users u ON u.id = r.receiver_id WHERE r.sender_id = ?
+        ORDER BY r.created_at
+        """,
+        (user["id"],),
+    ).fetchall()
     invitations = connection.execute(
         """
         SELECT g.room_code,
@@ -1417,6 +1425,7 @@ def dashboard():
     return jsonify(
         friends=[user_json(friend) for friend in friends],
         requests=[dict(row) for row in requests],
+        sentRequests=[dict(row) for row in sent_requests],
         invitations=[dict(row) for row in invitations],
         games=game_items,
     )
@@ -1427,13 +1436,21 @@ def send_friend_request():
     user = require_user()
     if user is None:
         return error("Sign in to add friends.", 401)
-    username = json_body().get("username")
-    if not isinstance(username, str):
-        return error("Enter a username.")
-    target = database().execute(
-        "SELECT id, username, rating FROM users WHERE username = ? COLLATE NOCASE",
-        (username.strip(),),
-    ).fetchone()
+    body = json_body()
+    target_id = body.get("userId")
+    username = body.get("username")
+    if isinstance(target_id, int) and not isinstance(target_id, bool):
+        target = database().execute(
+            "SELECT id, username, rating FROM users WHERE id = ?",
+            (target_id,),
+        ).fetchone()
+    elif isinstance(username, str):
+        target = database().execute(
+            "SELECT id, username, rating FROM users WHERE username = ? COLLATE NOCASE",
+            (username.strip(),),
+        ).fetchone()
+    else:
+        return error("Choose a player to add.")
     if target is None:
         return error("No account has that username.", 404)
     if target["id"] == user["id"]:
@@ -1444,6 +1461,12 @@ def send_friend_request():
         (first, second),
     ).fetchone():
         return error("You are already friends.", 409)
+    outgoing = database().execute(
+        "SELECT id FROM friend_requests WHERE sender_id = ? AND receiver_id = ?",
+        (user["id"], target["id"]),
+    ).fetchone()
+    if outgoing:
+        return jsonify(status="pending", requestId=outgoing["id"], friend=user_json(target))
     incoming = database().execute(
         "SELECT id FROM friend_requests WHERE sender_id = ? AND receiver_id = ?",
         (target["id"], user["id"]),
@@ -1947,60 +1970,68 @@ def award_game_coins(
         if winner_side != "w" or amount == 0:
             return
         source = "bot"
-        opponent_user_id = None
         daily_cap = BOT_GAME_DAILY_CAP
+        rewards = [(winner_user_id, None, amount)]
     else:
-        opponent_user_id = room[f"{'black' if winner_side == 'w' else 'white'}_user_id"]
-        if opponent_user_id is None or opponent_user_id == winner_user_id:
+        loser_user_id = room[f"{'black' if winner_side == 'w' else 'white'}_user_id"]
+        if loser_user_id is None or loser_user_id == winner_user_id:
             return
         winner_rating = room[f"{'white' if winner_side == 'w' else 'black'}_rating"]
         opponent_rating = room[f"{'black' if winner_side == 'w' else 'white'}_rating"]
-        amount = max(8, min(30, 18 + (opponent_rating - winner_rating) // 100))
+        amount = max(25, min(50, 35 + (opponent_rating - winner_rating) // 100))
         source = "player"
         daily_cap = PLAYER_GAME_DAILY_CAP
+        rewards = [
+            (winner_user_id, loser_user_id, amount),
+            (loser_user_id, winner_user_id, max(10, amount // 2)),
+        ]
 
     if connection.backend != "sqlite":
+        user_ids = sorted({user_id for user_id, _, _ in rewards})
+        placeholders = ", ".join("?" for _ in user_ids)
         connection.execute(
-            "SELECT id FROM users WHERE id = ? FOR UPDATE", (winner_user_id,)
-        ).fetchone()
-    earned_today = connection.execute(
-        """
-        SELECT COALESCE(SUM(amount), 0) AS total FROM coin_game_rewards
-        WHERE user_id = ? AND reward_day = ? AND source = ?
-        """,
-        (winner_user_id, reward_day, source),
-    ).fetchone()["total"]
-    if source == "player":
-        already_rewarded_opponent = connection.execute(
+            f"SELECT id FROM users WHERE id IN ({placeholders}) ORDER BY id FOR UPDATE",
+            tuple(user_ids),
+        ).fetchall()
+    for recipient_id, opponent_user_id, reward_amount in rewards:
+        earned_today = connection.execute(
             """
-            SELECT 1 FROM coin_game_rewards
-            WHERE user_id = ? AND opponent_user_id = ? AND reward_day = ?
-            LIMIT 1
+            SELECT COALESCE(SUM(amount), 0) AS total FROM coin_game_rewards
+            WHERE user_id = ? AND reward_day = ? AND source = ?
             """,
-            (winner_user_id, opponent_user_id, reward_day),
-        ).fetchone()
-        if already_rewarded_opponent is not None:
-            return
-    amount = min(amount, daily_cap - int(earned_today))
-    if amount <= 0:
-        return
-    reward_insert = connection.execute(
-        """
-        INSERT OR IGNORE INTO coin_game_rewards(
-            game_id, game_round, user_id, opponent_user_id, amount, source, reward_day
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            room["id"], room["game_round"], winner_user_id, opponent_user_id,
-            amount, source, reward_day,
-        ),
-    )
-    if reward_insert.rowcount == 0:
-        return
-    connection.execute(
-        "UPDATE users SET coins = coins + ? WHERE id = ?",
-        (amount, winner_user_id),
-    )
+            (recipient_id, reward_day, source),
+        ).fetchone()["total"]
+        if source == "player":
+            already_rewarded_opponent = connection.execute(
+                """
+                SELECT 1 FROM coin_game_rewards
+                WHERE user_id = ? AND opponent_user_id = ? AND reward_day = ?
+                LIMIT 1
+                """,
+                (recipient_id, opponent_user_id, reward_day),
+            ).fetchone()
+            if already_rewarded_opponent is not None:
+                continue
+        amount = min(reward_amount, daily_cap - int(earned_today))
+        if amount <= 0:
+            continue
+        reward_insert = connection.execute(
+            """
+            INSERT OR IGNORE INTO coin_game_rewards(
+                game_id, game_round, user_id, opponent_user_id, amount, source, reward_day
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                room["id"], room["game_round"], recipient_id, opponent_user_id,
+                amount, source, reward_day,
+            ),
+        )
+        if reward_insert.rowcount == 0:
+            continue
+        connection.execute(
+            "UPDATE users SET coins = coins + ? WHERE id = ?",
+            (amount, recipient_id),
+        )
 
 
 def room_snapshot(
