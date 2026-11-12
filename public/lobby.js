@@ -480,27 +480,35 @@ async function loadGlobalChat() {
 function setAccountView(user) {
   signedInUser = user;
   friendIds = new Set();
-  sentFriendIds = new Set();
-  incomingFriendRequests = new Map();
+  sentRequestIds = new Set();
+  receivedRequestMap = new Map();
   shopState = null;
+
   const signedIn = Boolean(user);
+
   accountPanel.classList.toggle("hidden", signedIn);
   friendsPanel.classList.toggle("hidden", !signedIn);
+
   document.querySelector("#logout-button").classList.toggle("hidden", !signedIn);
   document.querySelector("#global-chat-form").classList.toggle("hidden", !signedIn);
   document.querySelector("#global-chat-login").classList.toggle("hidden", signedIn);
   document.querySelector(".global-chat-prompts").classList.toggle("hidden", !signedIn);
+
   void loadGlobalChat();
+
   if (activeView === "shop") void loadShop();
+
   if (signedIn) {
     document.querySelector("#welcome-name").textContent = `Hello, ${user.username}`;
     loadDashboard();
+
     if (dashboardTimer) clearInterval(dashboardTimer);
     dashboardTimer = setInterval(loadDashboard, 5000);
   } else if (dashboardTimer) {
     clearInterval(dashboardTimer);
     dashboardTimer = null;
   }
+
   if (!signedIn) void loadLeaderboard();
 }
 
